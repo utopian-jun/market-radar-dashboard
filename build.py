@@ -294,14 +294,18 @@ def ai_credit_check(df: pd.DataFrame) -> dict:
     idx = [i for i in range(len(df)) if pd.notna(df["AI신용"].iloc[i])]
     out = {}
     for mode in ("earliest", "latest", "mid"):
-        match, bad = 0, []
+        match, n, bad = 0, 0, []
         for i in idx:
-            got, want = ai_credit_at(df, i, mode)["computed"], df["AI신용"].iloc[i]
-            if got == want:
+            a = ai_credit_at(df, i, mode)
+            if a["computed"] is None:       # 로그 시작 전 가격이 없어 계산 불가 — 비교 제외
+                continue
+            n += 1
+            want = df["AI신용"].iloc[i]
+            if a["computed"] == want:
                 match += 1
             else:
-                bad.append((df["수집일"].iloc[i].strftime("%Y-%m-%d"), want, got))
-        out[mode] = {"n": len(idx), "match": match, "mismatch": bad}
+                bad.append((df["수집일"].iloc[i].strftime("%Y-%m-%d"), want, a["computed"], a["crwv_1m_pct"], a["orcl_1m_pct"]))
+        out[mode] = {"n": n, "match": match, "mismatch": bad, "skipped": len(idx) - n}
     return out
 
 
@@ -394,10 +398,11 @@ def main(argv=None) -> int:
         print(f"경고: 최신 데이터가 {data['days_since_as_of']}일 전이다", file=sys.stderr)
     chk = ai_credit_check(df)
     if chk["latest"]["n"]:
-        print("AI신용 검증(시트 값 vs 계산): " + " · ".join(f"{m} {v['match']}/{v['n']}" for m, v in chk.items()))
+        print("AI신용 검증(시트 값 vs 계산, 계산 가능한 행만): " + " · ".join(
+            f"{m} {v['match']}/{v['n']}" for m, v in chk.items()) + f" (계산 불가 {chk['latest']['skipped']}행 제외)")
         for m, v in chk.items():
-            for d, want, got in v["mismatch"][:6]:
-                print(f"  [{m}] 불일치 {d}: 시트 {want} / 계산 {got}")
+            for d, want, got, cp, op in v["mismatch"][:8]:
+                print(f"  [{m}] 불일치 {d}: 시트 {want} / 계산 {got} (CRWV {cp}%, ORCL {op}%)")
     if not args.no_llm:
         import llm
         llm.run(data, args.out, force=args.force_llm)   # 실패해도 빌드는 성공 (직전 해석 유지)
