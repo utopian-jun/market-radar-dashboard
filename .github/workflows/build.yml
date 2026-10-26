@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 4 * * *"      # 매일 UTC 04:00 = KST 13:00
   workflow_dispatch:          # Actions 탭의 수동 실행 버튼
+    inputs:
+      force_llm:
+        description: "캐시가 있어도 AI 해석을 다시 생성"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,7 +45,7 @@ jobs:
           SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_MODEL: ${{ vars.LLM_MODEL }}
-        run: python build.py
+        run: python build.py ${{ inputs.force_llm && '--force-llm' || '' }}
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

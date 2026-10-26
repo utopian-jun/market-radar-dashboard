@@ -131,6 +131,12 @@ def _f(v):
     return round(float(v), 4)
 
 
+def _i(v):
+    """개수형 값(거시경고수) → int. 비었으면 None."""
+    f = _f(v)
+    return None if f is None else int(round(f))
+
+
 def _row_json(row: pd.Series) -> dict:
     out = {}
     for c in COLUMNS:
@@ -140,7 +146,7 @@ def _row_json(row: pd.Series) -> dict:
         elif c in TEXT_COLS:
             out[c] = None if pd.isna(v) else str(v)
         else:
-            out[c] = _f(v)
+            out[c] = _i(v) if c == "거시경고수" else _f(v)
     return out
 
 
@@ -245,7 +251,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
             "credit": None if pd.isna(latest["신용"]) else str(latest["신용"]),
             "volatility": None if pd.isna(latest["변동성"]) else str(latest["변동성"]),
             "sentiment": None if pd.isna(latest["심리"]) else str(latest["심리"]),
-            "macro_warnings": _f(latest["거시경고수"]),
+            "macro_warnings": _i(latest["거시경고수"]),
         },
         "indicators": indicators,
         "near_threshold": [k for k, v in indicators.items() if v["near_threshold"]],
