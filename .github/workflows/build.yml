@@ -2,7 +2,8 @@ name: build-and-deploy
 
 on:
   schedule:
-    - cron: "0 4 * * *"      # 매일 UTC 04:00 = KST 13:00
+    - cron: "0 2 * * *"      # 매일 UTC 02:00 = KST 11:00
+    - cron: "0 9 * * *"      # 매일 UTC 09:00 = KST 18:00 (오전 수집이 늦어졌을 때 보완)
   workflow_dispatch:          # Actions 탭의 수동 실행 버튼
     inputs:
       force_llm:
