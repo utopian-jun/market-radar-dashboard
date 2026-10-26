@@ -97,7 +97,7 @@ O 추세 | P 신용 | Q 변동성 | R 심리 | S 거시경고수 | T SPY | U SPY
 
 ## 6. AI 해석 명세
 
-- 모델: `gemini-2.5-flash` 기본. 품질 부족하면 상위 Gemini 모델로 교체 — 환경변수 `LLM_MODEL`
+- 모델: `gemini-3.5-flash-lite` 기본. 품질 부족하면 `gemini-3.8-flash`로 교체 — 환경변수 `LLM_MODEL`
 - 호출 조건: 로그 최신 수집일 ≠ 캐시된 commentary의 기준일일 때만
 - 입력(JSON): 최신 행 전체, 30일 전 행, 지표별 수집 기간 평균·백분위, 임계값 표, 경계선 근접 목록, 판정·현금 가이드
 - 출력(JSON 강제):

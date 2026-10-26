@@ -1,6 +1,6 @@
 """4단계 — Gemini API 해석 생성: 호출 · 날짜별 캐시 · 숫자 검증 · 실패 대비
 
-키는 환경변수 GEMINI_API_KEY (GitHub Secrets). 모델은 LLM_MODEL (기본 gemini-2.5-flash).
+키는 환경변수 GEMINI_API_KEY (GitHub Secrets). 모델은 LLM_MODEL (기본 gemini-3.5-flash-lite).
 출력: <out>/commentary.json
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import re
 import sys
 from datetime import datetime
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 KEYS = ["HY_OAS", "VIX", "US10Y", "WTI", "DXY", "FEAR_GREED", "PC_TOTAL", "PC_EQUITY"]
 TOLERANCE = 0.01          # 입력값 대비 ±1%
