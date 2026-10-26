@@ -331,6 +331,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     series = {
         "dates": [d.strftime("%Y-%m-%d") for d in df["수집일"]],
         "CCC": [_f(v) for v in df["CCC OAS(%)"]],
+        "AI신용": [None if pd.isna(v) else str(v) for v in df["AI신용"]],   # 시트 값(백필 구간). 수집 행은 비어 있다
         "CRWV": [_f(v) for v in df["CRWV"]],
         "ORCL": [_f(v) for v in df["ORCL"]],
         **{k: [_f(v) for v in df[spec["col"]]] for k, spec in INDICATORS.items()},
