@@ -20,14 +20,25 @@ CONTEXT_NUMBERS = {1, 2, 3, 4, 5, 10, 30, 200}   # '30일', '5일 평균' 같은
 SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이다. 규칙:
 1. 제공된 JSON의 숫자만 근거로 쓴다. 뉴스·이벤트·원인 추측 금지. 새 숫자를 계산해서 만들지 말고 주어진 숫자를 그대로 인용한다.
 2. 매수·매도·비중 지시 금지. 판정과 현금 가이드는 주어진 값을 인용만 한다.
-3. 지표별(indicators): 지금 어느 구간인지 + 30일 방향 + 기간 평균 대비 위치를 1~2문장으로. 평균은 '1년 평균'이 아니라 '기간 평균'이라 부르고 '수집 기간'이라는 말은 쓰지 않는다. 30일 전 값이 null이면 '30일 전 비교 값이 없다'고 짧게 말한다(이 지시문을 따라 쓰지 않는다).
-4. 종합(overall): 층들(추세·신용·변동성·심리·거시경고)이 서로 맞물리는지/엇갈리는지(예: 심리 극공포인데 신용 평온), 경계선 근처 항목을 3~5문장으로.
+3. 지표별(indicators): 2~3문장. 숫자 나열이 아니라 의미를 말한다 — (1) 지금 구간 (2) 30일 변화의 크기가 guide의 기준(속도·경보 수준)에 비춰 큰지 작은지 (3) percentile로 기간 중 어느 정도 위치인지(예: 상위 1%) (4) 그래서 무엇을 시사하는지(guide 근거). 변화가 크면 그 점을 먼저 말한다. 평균은 '1년 평균'이 아니라 '기간 평균'이라 부르고 '수집 기간'이라는 말은 쓰지 않는다. 30일 전 값이 null이면 '30일 전 비교 값이 없다'고 짧게 말한다(이 지시문을 따라 쓰지 않는다).
+4. 종합(overall): 4~6문장. 첫 문장은 오늘의 핵심 한 줄. 층들(추세·신용·변동성·심리·거시경고)이 맞물리는지/엇갈리는지와 그 의미, 30일 변화가 가장 큰 지표 2~3개, 경계선 근처 항목을 말한다. 어떤 지표가 guide의 경보 기준을 넘었는데 층 판정(예: 거시경고수)에 안 잡혀 있으면 '기준을 넘었다'고 사실만 짚는다(판정이 틀렸다고 단정하지 않는다).
 5. watch: 판정이 바뀔 수 있는 조건 1~2개 (입력의 임계값 기준).
 6. 지표는 label(예: HY OAS, 공포탐욕, 풋콜 Equity)로 부르고 JSON 키 이름(FEAR_GREED 등)은 쓰지 않는다. 구간은 zone_label 이름으로 말하고 구간 번호는 절대 쓰지 않는다(zone_label이 null이면 구간을 말하지 않는다). 숫자는 입력에 적힌 그대로 쓴다.
 7. 한국어 반말, 간결하고 약간 냉소적인 톤. 약어는 첫 등장에 짧게 풀이(예: HY OAS는 정크본드 가산금리).
 8. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
 9. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
 JSON으로만 답한다."""
+
+GUIDE = {  # PLAN.md 5장 해석 기준 요약
+    "HY_OAS": "정크본드 금리-국채 금리. 3.5% 미만 평온(지나치면 안일), 3.5~5% 주의, 5% 초과 스트레스. 수준보다 속도가 중요: 한 달 +1%p면 경보. 주식보다 먼저 움직이는 경향.",
+    "VIX": "S&P500 30일 예상 변동성. 15 미만 안일, 20~30 불안, 30 초과 공포, 40 초과 패닉. 급등 뒤 꺾이는 시점이 단기 바닥인 경우가 많다.",
+    "US10Y": "10년 국채 금리, 모든 자산의 할인율. 오르면 고PER 기술주에 불리. 수준보다 한 달 +0.4%p 같은 급등이 문제.",
+    "WTI": "원유 가격. 급등은 인플레 재점화·금리 인하 지연, 급락은 수요 둔화 신호일 수 있다. 거시 경고 기준은 한 달 +15%.",
+    "DXY": "달러 가치. 강세는 글로벌 유동성 긴축·미국 다국적기업 실적 역풍, 원화 투자자에겐 달러 매수 단가 상승.",
+    "FEAR_GREED": "반대로 읽는 지표. 25 이하 극공포는 역발상 기회 후보(단 신용이 멀쩡할 때만), 75 이상 극탐욕은 과열 경계.",
+    "PC_TOTAL": "전체 옵션 풋/콜. 1.1 이상 공포, 0.8 이하 낙관. 참고용.",
+    "PC_EQUITY": "개별주 옵션 풋/콜 5일 평균, 개인 심리에 가까움. 반대로 읽기: 0.8 이상 공포(역발상), 0.55 이하 탐욕.",
+}
 
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -47,6 +58,7 @@ def build_payload(data: dict) -> dict:
         inds[k] = {key: s[key] for key in (
             "label", "current", "prev_30d", "change_30d", "change_30d_pct", "mean", "min", "max",
             "percentile", "thresholds", "zone_label", "near_threshold")}
+        inds[k]["guide"] = GUIDE.get(k)
         for key in ("current", "prev_30d", "change_30d", "mean", "min", "max"):
             if isinstance(inds[k][key], float):
                 inds[k][key] = round(inds[k][key], 2)     # 모델이 소수 4자리를 그대로 읊지 않게
@@ -72,7 +84,7 @@ def call_gemini(payload: dict, model: str, api_key: str) -> str:
         "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json",
                              "responseSchema": RESPONSE_SCHEMA},
     }
-    r = requests.post(ENDPOINT.format(model=model), json=body, timeout=90,
+    r = requests.post(ENDPOINT.format(model=model), json=body, timeout=150,
                       headers={"x-goog-api-key": api_key})   # 키는 헤더로만 (URL·로그에 안 남김)
     if r.status_code != 200:
         raise RuntimeError(f"Gemini HTTP {r.status_code}: {r.text[:200]}")
