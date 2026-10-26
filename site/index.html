@@ -71,7 +71,7 @@ h2 { font-size: 15px; margin: 22px 0 8px; }
 .ai ul { margin: 6px 0 0; padding-left: 20px; }
 .ai .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
 .muted { color: var(--muted); }
-.charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.charts { display: grid; grid-template-columns: 1fr; gap: 12px; }   /* 한 줄에 카드 1개, 가로로 넓게 */
 .gcard { padding: 14px; min-width: 0; }
 .gtop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .gtop .name { font-weight: 700; }
@@ -80,7 +80,8 @@ h2 { font-size: 15px; margin: 22px 0 8px; }
 .range button { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px;
   padding: 2px 9px; font-size: 12px; cursor: pointer; }
 .range button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
-.plot { position: relative; height: 190px; }
+.plot { position: relative; height: 220px; }
+@media (min-width: 700px) { .plot { height: 280px; } }
 .plot .empty { position: absolute; left: 0; right: 0; top: 0; display: none; justify-content: center;
   text-align: center; color: var(--muted); font-size: 12px; pointer-events: none; padding: 4px 8px;
   background: var(--card); border-radius: 6px; }
@@ -292,7 +293,7 @@ function drawChart(key, days) {
     options: { responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: "index", intersect: false },
       plugins: { legend: { display: false }, tooltip: { filter: (i) => i.datasetIndex === 0 } },
-      scales: { x: { ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0 }, grid: { display: false } },
+      scales: { x: { ticks: { color: muted, maxTicksLimit: innerWidth >= 700 ? 10 : 5, maxRotation: 0 }, grid: { display: false } },
         y: { ticks: { color: muted }, grid: { color: grid } } } },
   }));
 }
