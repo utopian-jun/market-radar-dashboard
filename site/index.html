@@ -220,9 +220,9 @@ function renderTiles(d) {
     if (s.near_threshold) t.append(el("div", "near", "경계선 근처 · " + s.near_threshold.threshold + "까지 " + s.near_threshold.distance_pct + "%"));
     box.append(t);
   }
-  $("collect-note").textContent = d.collection_days < 21
-    ? "수집 " + d.collection_days + "일차 — 평균·백분위는 참고용"
-    : "수집 " + d.collection_days + "일차 (" + d.first_date + " ~)";
+  const bf = d.backfill_days ? " + 백필 " + d.backfill_days + "일" : "";
+  $("collect-note").textContent = "수집 " + d.collection_days + "일차" + bf
+    + ((d.history_days || d.collection_days) < 21 ? " — 평균·백분위는 참고용" : " · 평균·백분위는 백필 포함 " + d.first_date + " ~");
 }
 
 // ── 지표 설명 (PLAN.md 5장 초안). 장기 평균은 공개 자료 기준 대략값 — 출처 검증 전이라 "약"으로 표기
@@ -267,17 +267,21 @@ function sliceRange(d, key, days) {
     start = dates.findIndex((x) => x >= cs);
     if (start < 0) start = 0;
   }
-  return { labels: dates.slice(start), vals: vals.slice(start) };
+  return { labels: dates.slice(start), vals: vals.slice(start), src: (d.series.source || []).slice(start) };
 }
 
 function drawChart(key, days) {
   const s = DATA.indicators[key], canvas = document.getElementById("cv-" + key);
-  const { labels, vals } = sliceRange(DATA, key, days);
+  const { labels, vals, src } = sliceRange(DATA, key, days);
+  const isBf = (i) => src[i] === "백필";
   const nValid = vals.filter((v) => v != null).length;
   canvas.parentElement.classList.toggle("sparse", nValid < 2);
   const line = css("--text"), muted = css("--muted"), grid = css("--line");
+  const faint = css("--gray");   // 백필 구간은 옅은 선, 수집 구간은 진한 선
   const datasets = [{ data: vals, borderColor: line, backgroundColor: line, borderWidth: 2,
-    pointRadius: nValid < 8 ? 4 : 0, pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0 }];
+    pointRadius: nValid < 8 ? 4 : 0, pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0,
+    pointBackgroundColor: (c) => (isBf(c.dataIndex) ? faint : line),
+    segment: { borderColor: (c) => (isBf(c.p1DataIndex) ? faint : line) } }];
   s.thresholds.forEach((t) => datasets.push({ data: labels.map(() => t), borderColor: css("--amber"),
     borderDash: [5, 4], borderWidth: 1.2, pointRadius: 0, order: 1 }));
   if (s.mean != null && nValid >= 2) datasets.push({ data: labels.map(() => s.mean), borderColor: css("--blue"),
@@ -309,7 +313,8 @@ function renderCharts(d) {
     });
     const plot = el("div", "plot"), cv = document.createElement("canvas"); cv.id = "cv-" + key;
     plot.append(cv, el("div", "empty", "데이터 쌓이는 중 — 점 2개부터 선이 그려진다"));
-    const lg = (s.thresholds.length ? "┄ 임계 " + s.thresholds.join(" · ") + "   " : "") + "· 수집 기간 평균선";
+    const lg = (s.thresholds.length ? "┄ 임계 " + s.thresholds.join(" · ") + "   " : "") + "· 기간 평균선"
+      + (d.backfill_days ? " · 연한 선 = 백필" : "");
     const st = el("div", "stats"), has = s.n >= 2;
     [["평균", fmt(s.mean, dec)], ["최소", fmt(s.min, dec)], ["최대", fmt(s.max, dec)],
      ["백분위", has && s.percentile != null ? s.percentile.toFixed(0) + "%" : "—"]].forEach(([k, v]) => {

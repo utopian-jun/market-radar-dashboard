@@ -25,7 +25,7 @@ SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이�
 5. watch: 판정이 바뀔 수 있는 조건 1~2개 (입력의 임계값 기준).
 6. 한국어 반말, 간결하고 약간 냉소적인 톤. 약어는 첫 등장에 짧게 풀이(예: HY OAS는 정크본드 가산금리).
 7. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
-8. 수집 일수가 적으면(collection_days < 21) 평균·백분위는 참고용이라고 한 번 밝힌다.
+8. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
 JSON으로만 답한다."""
 
 RESPONSE_SCHEMA = {
@@ -49,6 +49,8 @@ def build_payload(data: dict) -> dict:
     return {
         "as_of": data["as_of"],
         "collection_days": data["collection_days"],
+        "backfill_days": data.get("backfill_days", 0),
+        "history_days": data.get("history_days", data["collection_days"]),
         "verdict": data["verdict"],
         "layers": data["layers"],
         "indicators": inds,

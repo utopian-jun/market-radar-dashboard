@@ -16,14 +16,15 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 
-# ── 스키마 (레이더로그 A~V, 변경 금지) ─────────────────────────────
+# ── 스키마 (레이더로그 A~W, 변경 금지) ─────────────────────────────
 COLUMNS = [
     "수집일", "HY OAS(%)", "VIX", "US10Y(%)", "WTI($)", "DXY", "공포탐욕", "공포탐욕 기준일",
     "풋콜 Total", "풋콜 Equity", "풋콜 Equity 5일평균", "CBOE 기준일", "잠정판정", "확정판정",
-    "추세", "신용", "변동성", "심리", "거시경고수", "SPY", "SPY 200일선", "원달러",
+    "추세", "신용", "변동성", "심리", "거시경고수", "SPY", "SPY 200일선", "원달러", "출처",
 ]
 DATE_COLS = ["수집일", "공포탐욕 기준일", "CBOE 기준일"]
-TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리"]
+TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "출처"]
+BACKFILL = "백필"   # 출처 열 값: 백필 / 수집(빈칸도 수집으로 본다)
 NUM_COLS = [c for c in COLUMNS if c not in DATE_COLS + TEXT_COLS]
 
 # 지표 8개: 키 → (컬럼, 라벨, 임계선, 판정에 쓰는 컬럼)
@@ -92,6 +93,10 @@ def _col_letter(i: int) -> str:
 
 def parse(text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
+    if [str(c).strip() for c in df.columns] == COLUMNS[:-1]:
+        # 시트에 W1 '출처'를 아직 안 붙인 이전 형식(22열) — 전부 수집 행으로 취급
+        print("경고: 헤더에 '출처'(W열)가 없다 — 모든 행을 '수집'으로 본다. 시트 W1에 '출처' 추가 필요", file=sys.stderr)
+        df["출처"] = ""
     check_header(df)
     df.columns = COLUMNS
     df = df.apply(lambda s: s.str.strip())
@@ -114,8 +119,13 @@ def parse(text: str) -> pd.DataFrame:
     for c in TEXT_COLS:
         df[c] = df[c].replace("", pd.NA)
 
+    df["출처"] = df["출처"].where(df["출처"].eq(BACKFILL), "수집")   # 백필 외 전부(빈칸 포함) 수집
+    df["_bf"] = df["출처"].eq(BACKFILL)
+
     before = len(df)
-    df = df[df["수집일"].notna()].sort_values("수집일").drop_duplicates("수집일", keep="last")
+    # 같은 날짜가 둘이면 수집 행이 이긴다 (백필보다 우선), 같은 출처끼리는 아래 행이 이긴다
+    df = df[df["수집일"].notna()].reset_index().sort_values(["수집일", "_bf", "index"], ascending=[True, True, False])
+    df = df.drop_duplicates("수집일", keep="first").sort_values("수집일").drop(columns="index")
     if len(df) < before:
         print(f"경고: 수집일이 비었거나 중복인 {before - len(df)}행 제외", file=sys.stderr)
     if df.empty:
@@ -207,7 +217,7 @@ def provisional_streak(df: pd.DataFrame) -> int | None:
         return None
     last, n = s.iloc[-1], 0
     for v in reversed(s.tolist()):
-        if v == last:
+        if pd.notna(v) and v == last:    # 판정이 비어 있는 백필 행에서 멈춘다
             n += 1
         else:
             break
@@ -230,6 +240,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
         "SPY_200MA": [_f(v) for v in df["SPY 200일선"]],
         "USDKRW": [_f(v) for v in df["원달러"]],
         "verdict": [None if pd.isna(v) else str(v) for v in df["확정판정"]],
+        "source": ["백필" if b else "수집" for b in df["_bf"]],
     }
 
     return {
@@ -237,8 +248,11 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
         "as_of": latest_date.strftime("%Y-%m-%d"),
         "days_since_as_of": int(age),
         "stale": bool(age > STALE_DAYS),
-        "collection_days": int(len(df)),   # 수집 N일차 표기용
+        "collection_days": int((~df["_bf"]).sum()),   # 수집 N일차 표기용 (백필 제외)
+        "backfill_days": int(df["_bf"].sum()),
+        "history_days": int(len(df)),                  # 통계(평균·백분위)에 쓰인 전체 행 수
         "first_date": df["수집일"].iloc[0].strftime("%Y-%m-%d"),
+        "collection_first_date": df.loc[~df["_bf"], "수집일"].iloc[0].strftime("%Y-%m-%d") if (~df["_bf"]).any() else None,
         "verdict": {
             "confirmed": None if pd.isna(conf) else str(conf),
             "provisional": None if pd.isna(prov) else str(prov),
@@ -279,7 +293,7 @@ def main(argv=None) -> int:
     path = os.path.join(args.out, "data.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
-    print(f"data.json 생성: {path} (행 {len(df)}개, 기준일 {data['as_of']}, 수집 {data['collection_days']}일차)")
+    print(f"data.json 생성: {path} (행 {len(df)}개 = 수집 {data['collection_days']} + 백필 {data['backfill_days']}, 기준일 {data['as_of']})")
     if data["stale"]:
         print(f"경고: 최신 데이터가 {data['days_since_as_of']}일 전이다", file=sys.stderr)
     if not args.no_llm:

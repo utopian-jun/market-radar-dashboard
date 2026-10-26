@@ -2,5 +2,6 @@
 __pycache__/
 *.pyc
 sample/
+out/
 site/data.json
 site/commentary.json
