@@ -145,12 +145,12 @@ function el(tag, cls, text) {
 const VERDICT_TONE = { "공격": "green", "중립": "gray", "과열주의": "amber", "역발상기회": "blue", "방어": "red" };
 
 // 지표별 구간 라벨/색 (zone 번호 = 넘긴 임계선 개수). 임계 없는 지표는 구간 표시 없음.
-const ZONES = {
-  HY_OAS:     [["평온", "green"], ["주의", "amber"], ["스트레스", "red"]],
-  VIX:        [["안일", "blue"], ["보통", "green"], ["불안", "amber"], ["공포", "red"], ["패닉", "red"]],
-  FEAR_GREED: [["극공포", "blue"], ["중립", "gray"], ["극탐욕", "red"]],
-  PC_TOTAL:   [["낙관", "amber"], ["중립", "gray"], ["공포", "blue"]],
-  PC_EQUITY:  [["탐욕", "red"], ["중립", "gray"], ["공포", "blue"]],
+const ZONE_COLORS = {   // 구간 이름은 data.json(zone_label), 색만 여기서 정한다
+  HY_OAS:     ["green", "amber", "red"],
+  VIX:        ["blue", "green", "amber", "red", "red"],
+  FEAR_GREED: ["blue", "gray", "red"],
+  PC_TOTAL:   ["amber", "gray", "blue"],
+  PC_EQUITY:  ["red", "gray", "blue"],
 };
 const DECIMALS = { HY_OAS: 2, VIX: 2, US10Y: 2, WTI: 2, DXY: 2, FEAR_GREED: 0, PC_TOTAL: 2, PC_EQUITY: 2 };
 const CHIPS = [["추세", "trend"], ["신용", "credit"], ["변동성", "volatility"], ["심리", "sentiment"]];
@@ -204,7 +204,7 @@ function renderTiles(d) {
   box.replaceChildren();
   for (const [key, s] of Object.entries(d.indicators)) {
     const dec = DECIMALS[key] ?? 2;
-    const z = ZONES[key] && s.zone != null ? ZONES[key][s.zone] : null;
+    const z = ZONE_COLORS[key] && s.zone != null && s.zone_label ? [s.zone_label, ZONE_COLORS[key][s.zone]] : null;
     const t = el("div", "card tile" + (z ? " z-" + z[1] : ""));
     t.append(el("div", "name", s.label), el("div", "val", fmt(s.current, dec)));
     if (z) { const ze = el("div", "zone", z[0]); ze.style.color = "var(--" + z[1] + ")"; t.append(ze); }

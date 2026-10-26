@@ -23,9 +23,10 @@ SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이�
 3. 지표별(indicators): 지금 어느 구간인지 + 30일 방향 + 수집 기간 평균 대비 위치를 1~2문장으로. 30일 전 값이 null이면 방향은 '데이터 부족'이라고만 쓴다.
 4. 종합(overall): 층들(추세·신용·변동성·심리·거시경고)이 서로 맞물리는지/엇갈리는지(예: 심리 극공포인데 신용 평온), 경계선 근처 항목을 3~5문장으로.
 5. watch: 판정이 바뀔 수 있는 조건 1~2개 (입력의 임계값 기준).
-6. 한국어 반말, 간결하고 약간 냉소적인 톤. 약어는 첫 등장에 짧게 풀이(예: HY OAS는 정크본드 가산금리).
-7. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
-8. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
+6. 지표는 label(예: HY OAS, 공포탐욕, 풋콜 Equity)로 부르고 JSON 키 이름(FEAR_GREED 등)은 쓰지 않는다. 구간은 zone_label 이름으로 말하고 구간 번호는 절대 쓰지 않는다(zone_label이 null이면 구간을 말하지 않는다). 숫자는 입력에 적힌 그대로 쓴다.
+7. 한국어 반말, 간결하고 약간 냉소적인 톤. 약어는 첫 등장에 짧게 풀이(예: HY OAS는 정크본드 가산금리).
+8. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
+9. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
 JSON으로만 답한다."""
 
 RESPONSE_SCHEMA = {
@@ -45,7 +46,10 @@ def build_payload(data: dict) -> dict:
     for k, s in data["indicators"].items():
         inds[k] = {key: s[key] for key in (
             "label", "current", "prev_30d", "change_30d", "change_30d_pct", "mean", "min", "max",
-            "percentile", "thresholds", "zone", "near_threshold")}
+            "percentile", "thresholds", "zone_label", "near_threshold")}
+        for key in ("current", "prev_30d", "change_30d", "mean", "min", "max"):
+            if isinstance(inds[k][key], float):
+                inds[k][key] = round(inds[k][key], 2)     # 모델이 소수 4자리를 그대로 읊지 않게
     return {
         "as_of": data["as_of"],
         "collection_days": data["collection_days"],

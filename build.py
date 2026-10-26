@@ -47,6 +47,14 @@ CASH_GUIDE = {
     "역발상기회": "현금 15~20% · 개시선 아래 종목 분할 매수 · 슬리브 0%",
     "방어": "현금 30%+ · 신규 금지 · 슬리브 0%",
 }
+# 임계 개수 n개 → 구간 n+1개. 순서는 낮은 값 → 높은 값
+ZONE_LABELS = {
+    "HY_OAS":     ["평온", "주의", "스트레스"],
+    "VIX":        ["안일", "보통", "불안", "공포", "패닉"],
+    "FEAR_GREED": ["극공포", "중립", "극탐욕"],
+    "PC_TOTAL":   ["낙관", "중립", "공포"],
+    "PC_EQUITY":  ["탐욕", "중립", "공포"],
+}
 NEAR_RATIO = 0.10  # 임계까지 10% 이내면 '경계선 근처'
 STALE_DAYS = 3
 
@@ -178,7 +186,7 @@ def zone(value, thresholds):
     return sum(1 for t in thresholds if value >= t)
 
 
-def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp) -> dict:
+def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp, key: str = "") -> dict:
     s = df[spec["col"]]
     valid = s.dropna()
     cur = _f(s.iloc[-1])
@@ -206,6 +214,7 @@ def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp) -> 
         "n": int(len(valid)),
         "thresholds": spec["thresholds"],
         "zone": zone(cur, spec["thresholds"]),
+        "zone_label": (lambda z: ZONE_LABELS[key][z] if z is not None and key in ZONE_LABELS else None)(zone(cur, spec["thresholds"])),
         "near_threshold": near_threshold(cur, spec["thresholds"]),
     }
 
@@ -230,7 +239,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     latest_date = df["수집일"].iloc[-1]
     age = (pd.Timestamp(today) - latest_date).days
 
-    indicators = {k: indicator_stats(df, spec, latest_date) for k, spec in INDICATORS.items()}
+    indicators = {k: indicator_stats(df, spec, latest_date, k) for k, spec in INDICATORS.items()}
     prov, conf = latest["잠정판정"], latest["확정판정"]
 
     series = {
