@@ -54,7 +54,7 @@ button.theme { border: 1px solid var(--line); background: var(--card); color: va
 .chip .k { font-size: 12px; color: var(--muted); }
 .chip .v { font-size: 17px; font-weight: 700; margin-top: 2px; word-break: keep-all; }
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; grid-auto-flow: dense; }
 .tile { position: relative; padding: 14px; border-left: 5px solid var(--gray); }
 .tile.z-green { border-left-color: var(--green); } .tile.z-amber { border-left-color: var(--amber); }
 .tile.z-red { border-left-color: var(--red); } .tile.z-blue { border-left-color: var(--blue); }
@@ -65,6 +65,9 @@ button.theme { border: 1px solid var(--line); background: var(--card); color: va
 .tile .near { display: inline-block; margin-top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 999px;
   background: var(--amber-bg); color: var(--amber); font-weight: 600; }
 .up { color: var(--red); } .down { color: var(--blue); }
+.tile.wide { grid-column: span 2; }   /* 공포탐욕 게이지 타일은 2칸 폭 */
+.gauge { display: block; width: 100%; max-width: 300px; margin: 6px auto 0; }
+.gauge-cap { text-align: center; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
 
 h2 { font-size: 15px; margin: 22px 0 8px; }
 .ai { line-height: 1.7; }
@@ -156,6 +159,38 @@ const ZONE_COLORS = {   // 구간 이름은 data.json(zone_label), 색만 여기
 const DECIMALS = { HY_OAS: 2, VIX: 2, US10Y: 2, WTI: 2, DXY: 2, FEAR_GREED: 0, PC_TOTAL: 2, PC_EQUITY: 2 };
 const CHIPS = [["추세", "trend"], ["신용", "credit"], ["변동성", "volatility"], ["심리", "sentiment"]];
 
+// 공포탐욕 게이지 (CNN 형태): 반원 5구간 + 바늘 + 가운데 숫자
+const FG_SEGS = [  // [시작, 끝, 이름, 색]
+  [0, 25, "극공포", "red"], [25, 45, "공포", "amber"], [45, 55, "중립", "gray"],
+  [55, 75, "탐욕", "green"], [75, 100, "극탐욕", "green"],
+];
+function gaugeSVG(value) {
+  const NS = "http://www.w3.org/2000/svg", cx = 100, cy = 100, R = 92, r = 62;
+  const pt = (v, rad) => { const t = Math.PI * (1 - v / 100); return [cx + rad * Math.cos(t), cy - rad * Math.sin(t)]; };
+  const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const v = Math.max(0, Math.min(100, value));
+  const active = FG_SEGS.find((s) => v >= s[0] && v <= s[1]) || FG_SEGS[0];
+  const svg = mk("svg", { viewBox: "0 0 200 112", class: "gauge", role: "img", "aria-label": "공포탐욕 " + value + " " + active[2] });
+  for (const seg of FG_SEGS) {
+    const [a, b] = [pt(seg[0], R), pt(seg[1], R)], [c, d] = [pt(seg[1], r), pt(seg[0], r)];
+    const on = seg === active;
+    svg.append(mk("path", {
+      d: `M${a[0]},${a[1]} A${R},${R} 0 0 1 ${b[0]},${b[1]} L${c[0]},${c[1]} A${r},${r} 0 0 0 ${d[0]},${d[1]} Z`,
+      fill: on ? `var(--${seg[3]}-bg)` : "var(--gray-bg)", stroke: on ? `var(--${seg[3]})` : "var(--card)", "stroke-width": on ? 1.5 : 2.5,
+    }));
+  }
+  [0, 25, 50, 75, 100].forEach((n) => {          // 눈금 숫자
+    const [x, y] = pt(n, r - 9), t = mk("text", { x, y: y + 3, "text-anchor": "middle", "font-size": 8, fill: "var(--muted)" });
+    t.textContent = n; svg.append(t);
+  });
+  const t = Math.PI * (1 - v / 100), tip = pt(v, r + 14), nx = Math.sin(t) * 4, ny = Math.cos(t) * 4;   // 바늘
+  svg.append(mk("polygon", { points: `${tip[0]},${tip[1]} ${cx + nx},${cy + ny} ${cx - nx},${cy - ny}`, fill: "var(--text)" }));
+  svg.append(mk("circle", { cx, cy, r: 24, fill: "var(--card)" }));
+  const num = mk("text", { x: cx, y: cy + 8, "text-anchor": "middle", "font-size": 24, "font-weight": 800, fill: "var(--text)" });
+  num.textContent = Math.round(value); svg.append(num);
+  return [svg, active];
+}
+
 function fmt(v, d) { return v == null ? "—" : Number(v).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d }); }
 
 function chipTone(v) {
@@ -206,9 +241,17 @@ function renderTiles(d) {
   for (const [key, s] of Object.entries(d.indicators)) {
     const dec = DECIMALS[key] ?? 2;
     const z = ZONE_COLORS[key] && s.zone != null && s.zone_label ? [s.zone_label, ZONE_COLORS[key][s.zone]] : null;
-    const t = el("div", "card tile" + (z ? " z-" + z[1] : ""));
-    t.append(el("div", "name", s.label), el("div", "val", fmt(s.current, dec)));
-    if (z) { const ze = el("div", "zone", z[0]); ze.style.color = "var(--" + z[1] + ")"; t.append(ze); }
+    const t = el("div", "card tile" + (z ? " z-" + z[1] : "") + (key === "FEAR_GREED" ? " wide" : ""));
+    t.append(el("div", "name", s.label));
+    if (key === "FEAR_GREED" && s.current != null) {
+      const [svg, seg] = gaugeSVG(s.current);
+      const cap = el("div", "gauge-cap", seg[2]); cap.style.color = "var(--" + seg[3] + ")";
+      t.append(svg, cap);
+    } else {
+      t.append(el("div", "val", fmt(s.current, dec)));
+    }
+    // 공포탐욕은 게이지 아래 이름이 구간 표시를 대신한다
+    if (z && key !== "FEAR_GREED") { const ze = el("div", "zone", z[0]); ze.style.color = "var(--" + z[1] + ")"; t.append(ze); }
     const chg = el("div", "chg");
     if (s.change_30d == null) chg.textContent = "30일 변화 — (데이터 부족)";
     else {
