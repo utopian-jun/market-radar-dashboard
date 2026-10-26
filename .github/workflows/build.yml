@@ -1,0 +1,58 @@
+name: build-and-deploy
+
+on:
+  schedule:
+    - cron: "0 4 * * *"      # 매일 UTC 04:00 = KST 13:00
+  workflow_dispatch:          # Actions 탭의 수동 실행 버튼
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 해석 캐시: 직전 실행의 commentary.json을 복원 → 최신 수집일이 같으면 API를 다시 부르지 않는다
+      - name: Restore commentary cache
+        uses: actions/cache@v4
+        with:
+          path: site/commentary.json
+          key: commentary-${{ github.run_id }}
+          restore-keys: commentary-
+
+      - name: Build
+        env:
+          SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+        run: python build.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

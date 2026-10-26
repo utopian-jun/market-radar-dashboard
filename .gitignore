@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+sample/
+site/data.json
+site/commentary.json

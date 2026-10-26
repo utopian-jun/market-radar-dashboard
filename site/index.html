@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시장 레이더</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9; --card: #ffffff; --text: #1b1f27; --muted: #667085; --line: #e3e6ec;
+  --green: #1f9d55; --amber: #c98a00; --red: #d64545; --blue: #3b6fd4; --gray: #8a93a3;
+  --green-bg: #e6f5ec; --amber-bg: #fdf3d9; --red-bg: #fbe7e7; --blue-bg: #e7eefb; --gray-bg: #eef0f4;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1218; --card: #181c25; --text: #e8ebf1; --muted: #98a2b3; --line: #2a303c;
+    --green: #4cc38a; --amber: #e5b43c; --red: #ef7373; --blue: #7ea3f0; --gray: #8a93a3;
+    --green-bg: #15301f; --amber-bg: #33290f; --red-bg: #361919; --blue-bg: #18253f; --gray-bg: #232834;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1218; --card: #181c25; --text: #e8ebf1; --muted: #98a2b3; --line: #2a303c;
+  --green: #4cc38a; --amber: #e5b43c; --red: #ef7373; --blue: #7ea3f0; --gray: #8a93a3;
+  --green-bg: #15301f; --amber-bg: #33290f; --red-bg: #361919; --blue-bg: #18253f; --gray-bg: #232834;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  word-break: keep-all; overflow-wrap: anywhere; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+header h1 { font-size: 18px; margin: 0; flex: 1 1 auto; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--gray-bg); color: var(--muted); }
+.badge.warn { background: var(--amber-bg); color: var(--amber); font-weight: 600; }
+button.theme { border: 1px solid var(--line); background: var(--card); color: var(--text);
+  border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+
+.verdict { text-align: center; padding: 24px 16px; border-width: 2px; }
+.verdict .label { font-size: 13px; color: var(--muted); }
+.verdict .big { font-size: clamp(30px, 8vw, 46px); font-weight: 800; margin: 4px 0; }
+.verdict .guide { font-size: 16px; margin-top: 6px; }
+.verdict .prov { font-size: 12px; color: var(--muted); margin-top: 10px; }
+.tone-green { border-color: var(--green); } .tone-green .big { color: var(--green); }
+.tone-amber { border-color: var(--amber); } .tone-amber .big { color: var(--amber); }
+.tone-red   { border-color: var(--red); }   .tone-red .big { color: var(--red); }
+.tone-blue  { border-color: var(--blue); }  .tone-blue .big { color: var(--blue); }
+.tone-gray  { border-color: var(--line); }
+
+.chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0; }
+.chip { text-align: center; padding: 10px 4px; }
+.chip .k { font-size: 12px; color: var(--muted); }
+.chip .v { font-size: 17px; font-weight: 700; margin-top: 2px; word-break: keep-all; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.tile { position: relative; padding: 14px; border-left: 5px solid var(--gray); }
+.tile.z-green { border-left-color: var(--green); } .tile.z-amber { border-left-color: var(--amber); }
+.tile.z-red { border-left-color: var(--red); } .tile.z-blue { border-left-color: var(--blue); }
+.tile .name { font-size: 13px; color: var(--muted); }
+.tile .val { font-size: 26px; font-weight: 700; margin: 2px 0; }
+.tile .zone { font-size: 12px; font-weight: 600; }
+.tile .chg { font-size: 13px; color: var(--muted); }
+.tile .near { display: inline-block; margin-top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  background: var(--amber-bg); color: var(--amber); font-weight: 600; }
+.up { color: var(--red); } .down { color: var(--blue); }
+
+h2 { font-size: 15px; margin: 22px 0 8px; }
+.ai { line-height: 1.7; }
+.ai ul { margin: 6px 0 0; padding-left: 20px; }
+.ai .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+.muted { color: var(--muted); }
+.charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 12px; }
+.gcard { padding: 14px; min-width: 0; }
+.gtop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.gtop .name { font-weight: 700; }
+.gtop .cur { font-size: 22px; font-weight: 700; }
+.range { display: flex; gap: 4px; margin: 8px 0; }
+.range button { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px;
+  padding: 2px 9px; font-size: 12px; cursor: pointer; }
+.range button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.plot { position: relative; height: 190px; }
+.plot .empty { position: absolute; left: 0; right: 0; top: 0; display: none; justify-content: center;
+  text-align: center; color: var(--muted); font-size: 12px; pointer-events: none; padding: 4px 8px;
+  background: var(--card); border-radius: 6px; }
+.plot.sparse .empty { display: flex; }
+.legend { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 10px; font-size: 12px; }
+.stats div span { display: block; color: var(--muted); font-size: 11px; }
+.gline { font-size: 13px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.gline:empty { display: none; }
+details.desc { margin-top: 10px; font-size: 13px; }
+details.desc summary { cursor: pointer; color: var(--muted); }
+details.desc dl { margin: 8px 0 0; }
+details.desc dt { font-weight: 600; margin-top: 6px; }
+details.desc dd { margin: 2px 0 0; color: var(--muted); }
+footer { margin: 28px 0 8px; font-size: 12px; color: var(--muted); text-align: center; }
+@media (max-width: 560px) {
+  .chips { grid-template-columns: repeat(3, 1fr); }
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+  .tile .val { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>시장 레이더</h1>
+    <span class="badge" id="asof">불러오는 중…</span>
+    <span class="badge warn" id="stale" hidden></span>
+    <button class="theme" id="theme" type="button" aria-label="테마 전환">◐</button>
+  </header>
+
+  <div id="error" class="card" hidden></div>
+
+  <section id="verdict" class="card verdict tone-gray"></section>
+  <section id="chips" class="chips"></section>
+
+  <h2>지표 8개</h2>
+  <section id="tiles" class="tiles"></section>
+  <div id="collect-note" class="muted" style="font-size:12px;margin-top:6px"></div>
+
+  <h2>AI 해석</h2>
+  <section id="ai" class="card ai"><span class="muted">해석 준비 중 (4단계에서 연결)</span></section>
+
+  <h2>지표별 그래프</h2>
+  <section id="charts" class="charts"></section>
+
+  <footer>이 페이지는 정보 표시 도구다. 매매 판단은 Rulebook·밸류·P4가 한다.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+// 확정판정 → 색 톤
+const VERDICT_TONE = { "공격": "green", "중립": "gray", "과열주의": "amber", "역발상기회": "blue", "방어": "red" };
+
+// 지표별 구간 라벨/색 (zone 번호 = 넘긴 임계선 개수). 임계 없는 지표는 구간 표시 없음.
+const ZONES = {
+  HY_OAS:     [["평온", "green"], ["주의", "amber"], ["스트레스", "red"]],
+  VIX:        [["안일", "blue"], ["보통", "green"], ["불안", "amber"], ["공포", "red"], ["패닉", "red"]],
+  FEAR_GREED: [["극공포", "blue"], ["중립", "gray"], ["극탐욕", "red"]],
+  PC_TOTAL:   [["낙관", "amber"], ["중립", "gray"], ["공포", "blue"]],
+  PC_EQUITY:  [["탐욕", "red"], ["중립", "gray"], ["공포", "blue"]],
+};
+const DECIMALS = { HY_OAS: 2, VIX: 2, US10Y: 2, WTI: 2, DXY: 2, FEAR_GREED: 0, PC_TOTAL: 2, PC_EQUITY: 2 };
+const CHIPS = [["추세", "trend"], ["신용", "credit"], ["변동성", "volatility"], ["심리", "sentiment"]];
+
+function fmt(v, d) { return v == null ? "—" : Number(v).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+
+function chipTone(v) {
+  if (v == null) return "gray";
+  if (v.includes("🟢")) return "green";
+  if (v.includes("🟡")) return "amber";
+  if (v.includes("🔴")) return "red";
+  if (v.includes("극공포")) return "blue";
+  if (v.includes("극탐욕")) return "red";
+  return "gray";
+}
+
+function renderHeader(d) {
+  $("asof").textContent = "기준일 " + d.as_of;
+  const s = $("stale");
+  if (d.stale) { s.hidden = false; s.textContent = "⚠️ " + d.days_since_as_of + "일 전 데이터"; }
+}
+
+function renderVerdict(d) {
+  const v = d.verdict, box = $("verdict");
+  box.replaceChildren();
+  box.className = "card verdict tone-" + (VERDICT_TONE[v.confirmed] || "gray");
+  box.append(el("div", "label", "오늘의 판정"), el("div", "big", v.confirmed || "판정 없음"));
+  if (v.cash_guide) box.append(el("div", "guide", "현금 가이드 · " + v.cash_guide));
+  if (v.differs) {
+    const n = v.provisional_streak_days;
+    box.append(el("div", "prov", "잠정: " + v.provisional + (n ? " (유지 " + n + "일째, 10일 채우면 확정 전환)" : "")));
+  }
+}
+
+function renderChips(d) {
+  const box = $("chips");
+  box.replaceChildren();
+  const add = (k, v, tone) => {
+    const c = el("div", "card chip");
+    c.append(el("div", "k", k), el("div", "v", v == null ? "—" : v));
+    c.querySelector(".v").style.color = "var(--" + tone + ")";
+    box.append(c);
+  };
+  for (const [label, key] of CHIPS) add(label, d.layers[key], chipTone(d.layers[key]));
+  const w = d.layers.macro_warnings;
+  add("거시경고", w == null ? null : w + "개", w == null ? "gray" : w === 0 ? "green" : w === 1 ? "amber" : "red");
+}
+
+function renderTiles(d) {
+  const box = $("tiles");
+  box.replaceChildren();
+  for (const [key, s] of Object.entries(d.indicators)) {
+    const dec = DECIMALS[key] ?? 2;
+    const z = ZONES[key] && s.zone != null ? ZONES[key][s.zone] : null;
+    const t = el("div", "card tile" + (z ? " z-" + z[1] : ""));
+    t.append(el("div", "name", s.label), el("div", "val", fmt(s.current, dec)));
+    if (z) { const ze = el("div", "zone", z[0]); ze.style.color = "var(--" + z[1] + ")"; t.append(ze); }
+    const chg = el("div", "chg");
+    if (s.change_30d == null) chg.textContent = "30일 변화 — (데이터 부족)";
+    else {
+      const arrow = s.change_30d > 0 ? "▲" : s.change_30d < 0 ? "▼" : "–";
+      const a = el("span", s.change_30d > 0 ? "up" : s.change_30d < 0 ? "down" : "", arrow + " " + fmt(Math.abs(s.change_30d), dec));
+      chg.append("30일 ", a);
+      if (s.change_30d_pct != null) chg.append(" (" + (s.change_30d_pct > 0 ? "+" : "") + s.change_30d_pct.toFixed(1) + "%)");
+    }
+    t.append(chg);
+    if (s.near_threshold) t.append(el("div", "near", "경계선 근처 · " + s.near_threshold.threshold + "까지 " + s.near_threshold.distance_pct + "%"));
+    box.append(t);
+  }
+  $("collect-note").textContent = d.collection_days < 21
+    ? "수집 " + d.collection_days + "일차 — 평균·백분위는 참고용"
+    : "수집 " + d.collection_days + "일차 (" + d.first_date + " ~)";
+}
+
+// ── 지표 설명 (PLAN.md 5장 초안). 장기 평균은 공개 자료 기준 대략값 — 출처 검증 전이라 "약"으로 표기
+const DESC = {
+  HY_OAS: ["투기등급(정크) 회사채 금리 − 국채 금리. 돈 빌려주는 쪽이 느끼는 위험.",
+    "약 5%대 (1997년~). 평온기 3~4%",
+    "3.5% 미만 평온(지나치면 안일) / 3.5~5% 주의 / 5% 초과 스트레스. 2020.3 약 11%, 2008 약 20%. 수준보다 속도 — 한 달 +1%p면 경보. 주식보다 먼저 움직이는 경향."],
+  VIX: ["S&P500 옵션으로 계산한 향후 30일 예상 변동성. '공포지수'.",
+    "약 19~20",
+    "15 미만 안일 / 20~30 불안 / 30 초과 공포 / 40 초과 패닉(2020.3 82). 급등 뒤 꺾이는 시점이 단기 바닥인 경우가 많음."],
+  US10Y: ["미국 10년 국채 금리. 모든 자산의 할인율.",
+    "시기별로 다름 (2010년대 약 2%대, 2023년~ 4%대)",
+    "오르면 미래 이익의 현재가치가 줄어 고PER 기술주에 불리. 수준보다 한 달 +0.4%p 같은 급등이 문제."],
+  WTI: ["서부텍사스산 원유 가격.",
+    "2010년~ 약 70달러 안팎",
+    "급등 → 인플레이션 재점화·금리 인하 지연 / 급락 → 수요 둔화 신호일 수 있음. 거시 경고는 한 달 +15%."],
+  DXY: ["주요 6개 통화 대비 달러 가치.",
+    "최근 10년 약 95~100",
+    "달러 강세 = 글로벌 유동성 긴축, 미국 다국적기업 실적 역풍. 원화 투자자에게는 달러 매수 단가 상승."],
+  FEAR_GREED: ["CNN이 7개 지표(모멘텀·신고가/신저가·시장폭·풋콜·정크본드 수요·VIX·안전자산 수요)를 합친 0~100 점수.",
+    "50 = 중립",
+    "반대로 읽는 지표. 25 이하 극공포 = 역발상 기회 후보(단 신용이 멀쩡할 때만), 75 이상 극탐욕 = 과열 경계."],
+  PC_TOTAL: ["전체 옵션(지수+개별주+ETF)의 풋 거래량 ÷ 콜 거래량.",
+    "약 0.9~1.0 (기관 헤지 포함이라 높게 나옴)",
+    "1.1 이상 공포, 0.8 이하 낙관 — 참고용."],
+  PC_EQUITY: ["개별 주식 옵션만의 풋÷콜. 개인 투자자 심리에 가까움. (그래프는 5일 평균)",
+    "약 0.6~0.7",
+    "반대로 읽기. 5일 평균 0.8 이상 공포(역발상), 0.55 이하 탐욕. 하루치는 소음이 커서 5일 평균으로 판정."],
+};
+const RANGES = [["1M", 30], ["3M", 91], ["6M", 182], ["전체", null]];
+const charts = new Map();   // key → Chart
+let DATA = null;
+
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function sliceRange(d, key, days) {
+  const dates = d.series.dates, vals = d.series[key];
+  let start = 0;
+  if (days != null) {
+    const cut = new Date(dates[dates.length - 1]); cut.setDate(cut.getDate() - days);
+    const cs = cut.toISOString().slice(0, 10);
+    start = dates.findIndex((x) => x >= cs);
+    if (start < 0) start = 0;
+  }
+  return { labels: dates.slice(start), vals: vals.slice(start) };
+}
+
+function drawChart(key, days) {
+  const s = DATA.indicators[key], canvas = document.getElementById("cv-" + key);
+  const { labels, vals } = sliceRange(DATA, key, days);
+  const nValid = vals.filter((v) => v != null).length;
+  canvas.parentElement.classList.toggle("sparse", nValid < 2);
+  const line = css("--text"), muted = css("--muted"), grid = css("--line");
+  const datasets = [{ data: vals, borderColor: line, backgroundColor: line, borderWidth: 2,
+    pointRadius: nValid < 8 ? 4 : 0, pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0 }];
+  s.thresholds.forEach((t) => datasets.push({ data: labels.map(() => t), borderColor: css("--amber"),
+    borderDash: [5, 4], borderWidth: 1.2, pointRadius: 0, order: 1 }));
+  if (s.mean != null && nValid >= 2) datasets.push({ data: labels.map(() => s.mean), borderColor: css("--blue"),
+    borderDash: [2, 3], borderWidth: 1.2, pointRadius: 0, order: 1 });
+  const old = charts.get(key); if (old) old.destroy();
+  charts.set(key, new Chart(canvas, {
+    type: "line", data: { labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { filter: (i) => i.datasetIndex === 0 } },
+      scales: { x: { ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0 }, grid: { display: false } },
+        y: { ticks: { color: muted }, grid: { color: grid } } } },
+  }));
+}
+
+function renderCharts(d) {
+  DATA = d;
+  const box = $("charts"); box.replaceChildren();
+  if (typeof Chart === "undefined") { box.append(el("div", "card muted", "차트 라이브러리를 불러오지 못했다")); return; }
+  for (const [key, s] of Object.entries(d.indicators)) {
+    const dec = DECIMALS[key] ?? 2, card = el("div", "card gcard");
+    const top = el("div", "gtop");
+    top.append(el("span", "name", s.label), el("span", "cur", fmt(s.current, dec)));
+    const rg = el("div", "range");
+    RANGES.forEach(([label, days], i) => {
+      const b = el("button", i === RANGES.length - 1 ? "on" : "", label); b.type = "button";
+      b.addEventListener("click", () => { rg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(key, days); });
+      rg.append(b);
+    });
+    const plot = el("div", "plot"), cv = document.createElement("canvas"); cv.id = "cv-" + key;
+    plot.append(cv, el("div", "empty", "데이터 쌓이는 중 — 점 2개부터 선이 그려진다"));
+    const lg = (s.thresholds.length ? "┄ 임계 " + s.thresholds.join(" · ") + "   " : "") + "· 수집 기간 평균선";
+    const st = el("div", "stats"), has = s.n >= 2;
+    [["평균", fmt(s.mean, dec)], ["최소", fmt(s.min, dec)], ["최대", fmt(s.max, dec)],
+     ["백분위", has && s.percentile != null ? s.percentile.toFixed(0) + "%" : "—"]].forEach(([k, v]) => {
+      const c = el("div", null, v); c.prepend(el("span", null, k)); st.append(c);
+    });
+    const gl = el("div", "gline"); gl.dataset.key = key;
+    const det = el("details", "desc"), [what, avg, interp] = DESC[key];
+    det.append(el("summary", null, "지표 설명"));
+    const dl = el("dl");
+    [["무엇인가", what], ["참고 장기 평균", avg], ["구간별 해석", interp]].forEach(([k, v]) => dl.append(el("dt", null, k), el("dd", null, v)));
+    det.append(dl);
+    card.append(top, rg, plot, el("div", "legend", lg), st, gl, det);
+    box.append(card);
+    drawChart(key, null);
+  }
+}
+
+async function renderCommentary() {
+  try {
+    const r = await fetch("commentary.json", { cache: "no-store" });
+    if (!r.ok) return;
+    const c = await r.json(), box = $("ai");
+    box.replaceChildren();
+    const ul = el("ul");
+    for (const s of c.overall || []) ul.append(el("li", null, s));
+    box.append(ul);
+    if (c.watch && c.watch.length) box.append(el("div", "meta", "주시: " + c.watch.join(" / ")));
+    const meta = el("div", "meta", "생성 " + (c.generated_at || "") + " · " + (c.model || "") + " · 기준일 " + (c.as_of || "") + " ");
+    if (c.update_failed) meta.append(el("span", "badge warn", "해석 갱신 실패 — 직전 해석 표시 중"));
+    box.append(meta);
+    for (const g of document.querySelectorAll(".gline")) g.textContent = (c.indicators || {})[g.dataset.key] || "";
+  } catch (e) { /* 해석 없음 — 자리표시자 유지 */ }
+}
+
+(async function main() {
+  try {
+    const r = await fetch("data.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("data.json " + r.status);
+    const d = await r.json();
+    renderHeader(d); renderVerdict(d); renderChips(d); renderTiles(d); renderCharts(d);
+    renderCommentary();
+  } catch (e) {
+    const b = $("error"); b.hidden = false;
+    b.textContent = "데이터를 불러오지 못했다: " + e.message + " (python build.py 실행 후 http.server로 열어야 한다)";
+    $("asof").textContent = "오류";
+  }
+})();
+
+$("theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  if (DATA) for (const [key, ch] of charts) { const on = document.querySelector("#cv-" + key).closest(".gcard").querySelector(".range .on");
+    drawChart(key, RANGES.find((r) => r[0] === on.textContent)[1]); }
+});
+</script>
+</body>
+</html>
