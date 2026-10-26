@@ -26,7 +26,8 @@ SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이�
 6. 지표는 label(예: HY OAS, 공포탐욕, 풋콜 Equity)로 부르고 JSON 키 이름(FEAR_GREED 등)은 쓰지 않는다. 구간은 zone_label 이름으로 말하고 구간 번호는 절대 쓰지 않는다(zone_label이 null이면 구간을 말하지 않는다). 숫자는 입력에 적힌 그대로 쓴다.
 7. 한국어 반말, 간결하고 약간 냉소적인 톤. 약어는 첫 등장에 짧게 풀이(예: HY OAS는 정크본드 가산금리).
 8. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
-9. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
+10. ccc_oas가 있으면 종합에서 HY OAS와 비교해 약한 고리(gap_vs_hy)가 벌어지는지 한 문장 이상 말한다. ai_credit이 있으면 종합에서 한 문장으로 다루되, 시장 전체 판정에는 반영되지 않는 AI 섹터 경보임을 밝히고 기준일(as_of)이 오늘과 다르면 그 날짜를 말한다. 이 둘은 indicators가 아니라 overall에서만 다룬다.
+11. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
 JSON으로만 답한다."""
 
 GUIDE = {  # PLAN.md 5장 해석 기준 요약
@@ -72,7 +73,27 @@ def build_payload(data: dict) -> dict:
         "indicators": inds,
         "near_threshold": data["near_threshold"],
         "latest_row": data["latest_row"],
+        "ccc_oas": _ccc(data),
+        "ai_credit": _ai(data),
     }
+
+
+def _ccc(data: dict):
+    c = (data.get("extras") or {}).get("CCC")
+    if not c or c.get("current") is None:
+        return None
+    r = lambda v: None if v is None else round(v, 2)
+    return {"label": "CCC OAS(%)", "current": r(c["current"]), "as_of": c.get("as_of"), "change_30d": r(c.get("change_30d")),
+            "gap_vs_hy": r(c.get("gap_vs_hy")), "percentile": c.get("percentile"), "mean": r(c.get("mean")),
+            "guide": "CCC 등급 회사채 스프레드(HY 중 가장 약한 고리). HY OAS보다 먼저·더 크게 벌어지는지 본다. 신용 판정 기준: CCC 30일 +1.0%p면 주의, +2.0%p면 경보."}
+
+
+def _ai(data: dict):
+    a = data.get("ai_credit")
+    if not a or a.get("verdict") is None:
+        return None
+    return {"verdict": a["verdict"], "crwv_1m_pct": a.get("crwv_1m_pct"), "orcl_1m_pct": a.get("orcl_1m_pct"), "as_of": a.get("as_of"),
+            "rules": a.get("rules"), "guide": "코어위브(CRWV)·오라클(ORCL) 1개월 주가 변화율로 본 AI 섹터 신용 경보. 시장 전체 판정(현금 가이드)에는 반영되지 않는 별도 섹터 신호."}
 
 
 # ── 호출 ──────────────────────────────────────────────────

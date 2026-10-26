@@ -49,10 +49,22 @@ button.theme { border: 1px solid var(--line); background: var(--card); color: va
 .tone-blue  { border-color: var(--blue); }  .tone-blue .big { color: var(--blue); }
 .tone-gray  { border-color: var(--line); }
 
-.chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0; }
+.chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0 8px; }
 .chip { text-align: center; padding: 10px 4px; }
 .chip .k { font-size: 12px; color: var(--muted); }
 .chip .v { font-size: 17px; font-weight: 700; margin-top: 2px; word-break: keep-all; }
+.aistrip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 14px; margin-bottom: 12px;
+  border-style: dashed; border-width: 2px; font-size: 13px; }   /* 최종 판정 미반영 — 점선 테두리로 구분 */
+.aistrip .k { font-weight: 700; } .aistrip .v { font-size: 18px; }
+.aistrip .tag { color: var(--muted); font-size: 12px; margin-left: auto; }
+.aigrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+.aigrid .plot { height: 150px; }
+.aitk .nm { font-weight: 700; } .aitk .px { font-size: 20px; font-weight: 700; margin-left: 6px; }
+.aitk .ch { font-size: 13px; margin-left: 6px; }
+.aitk .asof { font-size: 11px; color: var(--muted); }
+.ccc { font-size: 12px; margin-top: 8px; color: var(--muted); }
+.ccc b { color: var(--red); }
+@media (max-width: 700px) { .aigrid { grid-template-columns: 1fr; } }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; grid-auto-flow: dense; }
 .tile { position: relative; padding: 14px; border-left: 5px solid var(--gray); }
@@ -120,6 +132,7 @@ footer { margin: 28px 0 8px; font-size: 12px; color: var(--muted); text-align: c
 
   <section id="verdict" class="card verdict tone-gray"></section>
   <section id="chips" class="chips"></section>
+  <section id="aistrip" class="card aistrip"></section>
 
   <h2>지표 8개</h2>
   <section id="tiles" class="tiles"></section>
@@ -233,6 +246,17 @@ function renderChips(d) {
   for (const [label, key] of CHIPS) add(label, d.layers[key], chipTone(d.layers[key]));
   const w = d.layers.macro_warnings;
   add("거시경고", w == null ? null : w + "개", w == null ? "gray" : w === 0 ? "green" : w === 1 ? "amber" : "red");
+  renderAIStrip(d);
+}
+
+// AI 신용(CRWV·ORCL): 최종 판정에는 반영되지 않는 섹터 경보 — 점선 띠 + 라벨로 구분
+function renderAIStrip(d) {
+  const box = $("aistrip"), ai = d.ai_credit || {}, pct = (v) => (v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%");
+  box.replaceChildren();
+  const v = el("span", "v", ai.verdict || "—"); v.style.color = "var(--" + chipTone(ai.verdict) + ")";
+  box.append(el("span", "k", "AI 신용"), v,
+    el("span", null, ai.crwv_1m_pct == null ? "CRWV·ORCL 값 없음" : "CRWV " + pct(ai.crwv_1m_pct) + " · ORCL " + pct(ai.orcl_1m_pct) + " (1개월)"),
+    el("span", "tag", "최종 판정 미반영 · 섹터 경보" + (ai.as_of && ai.as_of !== d.as_of ? " · " + ai.as_of.slice(5) + " 기준" : "")));
 }
 
 function renderTiles(d) {
@@ -296,10 +320,12 @@ const DESC = {
     "약 0.6~0.7",
     "반대로 읽기. 5일 평균 0.8 이상 공포(역발상), 0.55 이하 탐욕. 하루치는 소음이 커서 5일 평균으로 판정."],
 };
+const EXTRA_KEYS = ["CCC", "CRWV", "ORCL"];
 const RANGES = [["1M", 30], ["3M", 91], ["6M", 182], ["전체", null]];
 const charts = new Map();   // key → Chart
 let DATA = null;
 
+const statOf = (key) => DATA.indicators[key] || DATA.extras[key];   // 지표 8개 + 보조(CCC·CRWV·ORCL)
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function sliceRange(d, key, days) {
@@ -315,29 +341,38 @@ function sliceRange(d, key, days) {
 }
 
 function drawChart(key, days) {
-  const s = DATA.indicators[key], canvas = document.getElementById("cv-" + key);
+  const s = statOf(key), canvas = document.getElementById("cv-" + key);
   const { labels, vals, src } = sliceRange(DATA, key, days);
   const isBf = (i) => src[i] === "백필";
   const nValid = vals.filter((v) => v != null).length;
   canvas.parentElement.classList.toggle("sparse", nValid < 2);
   const line = css("--text"), muted = css("--muted"), grid = css("--line");
   const faint = css("--gray");   // 백필 구간은 옅은 선, 수집 구간은 진한 선
-  const datasets = [{ data: vals, borderColor: line, backgroundColor: line, borderWidth: 2,
+  const datasets = [{ label: s.label, tip: true, data: vals, borderColor: line, backgroundColor: line, borderWidth: 2,
     pointRadius: nValid < 8 ? 4 : 0, pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0,
     pointBackgroundColor: (c) => (isBf(c.dataIndex) ? faint : line),
     segment: { borderColor: (c) => (isBf(c.p1DataIndex) ? faint : line) } }];
   s.thresholds.forEach((t) => datasets.push({ data: labels.map(() => t), borderColor: css("--amber"),
     borderDash: [5, 4], borderWidth: 1.2, pointRadius: 0, order: 1 }));
-  if (s.mean != null && nValid >= 2) datasets.push({ data: labels.map(() => s.mean), borderColor: css("--blue"),
+  let y1 = null;
+  if (key === "HY_OAS" && DATA.series.CCC) {   // CCC OAS를 오른쪽 보조축에 겹친다 — 약한 고리가 먼저 벌어지는지 보기 위함
+    const ccc = sliceRange(DATA, "CCC", days).vals;
+    if (ccc.some((v) => v != null)) {
+      datasets.push({ label: "CCC OAS", tip: true, data: ccc, yAxisID: "y1", borderColor: css("--red"), backgroundColor: css("--red"),
+        borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 4, tension: 0.15, spanGaps: true, order: 1 });
+      y1 = { position: "right", ticks: { color: css("--red") }, grid: { drawOnChartArea: false } };
+    }
+  }
+  if (s.mean != null && nValid >= 2 && !EXTRA_KEYS.includes(key)) datasets.push({ data: labels.map(() => s.mean), borderColor: css("--blue"),
     borderDash: [2, 3], borderWidth: 1.2, pointRadius: 0, order: 1 });
   const old = charts.get(key); if (old) old.destroy();
   charts.set(key, new Chart(canvas, {
     type: "line", data: { labels, datasets },
     options: { responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { filter: (i) => i.datasetIndex === 0 } },
+      plugins: { legend: { display: false }, tooltip: { filter: (i) => i.dataset.tip === true } },
       scales: { x: { ticks: { color: muted, maxTicksLimit: innerWidth >= 700 ? 10 : 5, maxRotation: 0 }, grid: { display: false } },
-        y: { ticks: { color: muted }, grid: { color: grid } } } },
+        y: { ticks: { color: muted }, grid: { color: grid } }, ...(y1 ? { y1 } : {}) } },
   }));
 }
 
@@ -370,10 +405,49 @@ function renderCharts(d) {
     const dl = el("dl");
     [["무엇인가", what], ["참고 장기 평균", avg], ["구간별 해석", interp]].forEach(([k, v]) => dl.append(el("dt", null, k), el("dd", null, v)));
     det.append(dl);
-    card.append(top, rg, plot, el("div", "legend", lg), st, gl, det);
+    card.append(top, rg, plot, el("div", "legend", lg + (key === "HY_OAS" && d.series.CCC ? " · 붉은 선 = CCC OAS(오른쪽 축)" : "")), st);
+    if (key === "HY_OAS" && d.extras.CCC && d.extras.CCC.current != null) {
+      const c = d.extras.CCC, ch = c.change_30d, line2 = el("div", "ccc");
+      line2.append("CCC OAS ", el("b", null, fmt(c.current, 2) + "%"),
+        ch == null ? "" : " · 30일 " + (ch > 0 ? "+" : "") + fmt(ch, 2) + "%p",
+        c.gap_vs_hy == null ? "" : " · CCC−HY 갭 " + fmt(c.gap_vs_hy, 2) + "%p",
+        c.as_of && c.as_of !== d.as_of ? " (" + c.as_of.slice(5) + " 기준)" : "");
+      card.append(line2);
+    }
+    card.append(gl, det);
     box.append(card);
     drawChart(key, null);
   }
+  renderAICard(d, box);
+}
+
+// CRWV·ORCL 소형 카드 (AI 신용 감시): 1개월 변화 위주
+function renderAICard(d, box) {
+  const ai = d.ai_credit || {}, card = el("div", "card gcard");
+  const top = el("div", "gtop");
+  top.append(el("span", "name", "AI 신용 감시 · CRWV · ORCL"), el("span", "cur", ai.verdict || "—"));
+  const rg = el("div", "range");
+  RANGES.forEach(([label, days], i) => {
+    const b = el("button", i === RANGES.length - 1 ? "on" : "", label); b.type = "button";
+    b.addEventListener("click", () => { rg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); EXTRA_KEYS.slice(1).forEach((k) => drawChart(k, days)); });
+    rg.append(b);
+  });
+  const grid = el("div", "aigrid");
+  [["CRWV", "코어위브", ai.crwv_1m_pct], ["ORCL", "오라클", ai.orcl_1m_pct]].forEach(([k, nm, p]) => {
+    const s = d.extras[k], box1 = el("div", "aitk"), head = el("div");
+    head.append(el("span", "nm", k + " " + nm), el("span", "px", s.current == null ? "—" : "$" + fmt(s.current, 2)));
+    const ch = el("span", "ch " + (p == null ? "" : p > 0 ? "up" : "down"), p == null ? "1M —" : "1M " + (p > 0 ? "+" : "") + p.toFixed(1) + "%");
+    head.append(ch);
+    const plot = el("div", "plot"), cv = document.createElement("canvas"); cv.id = "cv-" + k;
+    plot.append(cv, el("div", "empty", "데이터 쌓이는 중"));
+    box1.append(head, el("div", "asof", s.as_of ? s.as_of + " 종가" : "데이터 없음"), plot);
+    grid.append(box1);
+  });
+  const r = ai.rules || { red: {}, yellow: {} };
+  card.append(top, rg, grid, el("div", "legend",
+    "1개월 변화 기준 — 🔴 CRWV ≤ " + r.red.CRWV + "% 또는 ORCL ≤ " + r.red.ORCL + "% · 🟡 CRWV ≤ " + r.yellow.CRWV + "% 또는 ORCL ≤ " + r.yellow.ORCL + "%. 시장 전체 판정에는 반영되지 않는 AI 섹터 경보."));
+  box.append(card);
+  EXTRA_KEYS.slice(1).forEach((k) => drawChart(k, null));
 }
 
 async function renderCommentary() {

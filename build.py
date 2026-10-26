@@ -49,8 +49,8 @@ EXTRAS = {
 }
 # AI 신용: CRWV·ORCL 1개월 변화율(%) 규칙 — 최종 판정에는 반영하지 않는 섹터 경보 (패치 v1.1 §3)
 AI_RULES = {"red": {"CRWV": -30, "ORCL": -20}, "yellow": {"CRWV": -15, "ORCL": -10}}
-AI_WINDOW = (28, 35)        # 1개월 전 기준: 최신일 - 35일 ~ 28일 구간의 거래일
-AI_REF_MODE = "latest"      # 구간 안에서 어느 날을 쓰나: earliest(35일 쪽) / latest(28일 쪽) / mid
+AI_WINDOW = (28, 35)        # 1개월 전 기준일은 최신일 - 35일 ~ 28일 안의 거래일
+AI_REF_DAYS = 30            # 그중 (날짜 - 30일) 이후 첫 거래일을 쓴다 — 시트 백필 값과 247/249 일치하는 규칙
 # 확정판정 → 현금 가이드 (시트 B30과 동일하게 유지). 빈 문자열이면 화면에서 가이드 줄을 숨긴다.
 CASH_GUIDE = {
     "공격": "현금 5~10% · 추세 슬리브 한도 15%",
@@ -248,8 +248,8 @@ def provisional_streak(df: pd.DataFrame) -> int | None:
     return n
 
 
-def one_month_pct(df: pd.DataFrame, col: str, i: int, mode: str = AI_REF_MODE):
-    """i번째 행 기준 1개월 변화율(%). 기준일은 (날짜-35일 ~ 날짜-28일) 구간의 유효한 거래일."""
+def one_month_pct(df: pd.DataFrame, col: str, i: int):
+    """i번째 행 기준 1개월 변화율(%)과 기준일. 기준일 = (날짜-30일) 이후 첫 거래일, 28~35일 전 범위 안."""
     cur = df[col].iloc[i]
     if pd.isna(cur):
         return None
@@ -258,13 +258,8 @@ def one_month_pct(df: pd.DataFrame, col: str, i: int, mode: str = AI_REF_MODE):
     win = df[(df["수집일"] >= lo) & (df["수집일"] <= hi) & df[col].notna()]
     if win.empty:
         return None
-    if mode == "earliest":
-        base = win.iloc[0]
-    elif mode == "latest":
-        base = win.iloc[-1]
-    else:  # mid — 구간 한가운데(31.5일 전)에 가장 가까운 날
-        target = t - pd.Timedelta(days=31.5)
-        base = win.iloc[(win["수집일"] - target).abs().argmin()]
+    after = win[win["수집일"] >= t - pd.Timedelta(days=AI_REF_DAYS)]
+    base = after.iloc[0] if not after.empty else win.iloc[-1]     # 30일 이후가 없으면 구간에서 가장 가까운 날
     return (float(cur) / float(base[col]) - 1) * 100, base["수집일"]
 
 
@@ -280,8 +275,8 @@ def ai_verdict(crwv_pct, orcl_pct):
     return "🟢"
 
 
-def ai_credit_at(df: pd.DataFrame, i: int, mode: str = AI_REF_MODE) -> dict:
-    c, o = one_month_pct(df, "CRWV", i, mode), one_month_pct(df, "ORCL", i, mode)
+def ai_credit_at(df: pd.DataFrame, i: int) -> dict:
+    c, o = one_month_pct(df, "CRWV", i), one_month_pct(df, "ORCL", i)
     cp, op = (c[0] if c else None), (o[0] if o else None)
     return {"crwv_1m_pct": None if cp is None else round(cp, 2), "orcl_1m_pct": None if op is None else round(op, 2),
             "crwv_ref_date": c[1].strftime("%Y-%m-%d") if c else None,
@@ -290,23 +285,23 @@ def ai_credit_at(df: pd.DataFrame, i: int, mode: str = AI_REF_MODE) -> dict:
 
 
 def ai_credit_check(df: pd.DataFrame) -> dict:
-    """시트에 적힌 AI신용(백필 값)과 코드 계산값이 얼마나 같은지 — 기준일 선택 방식별."""
-    idx = [i for i in range(len(df)) if pd.notna(df["AI신용"].iloc[i])]
-    out = {}
-    for mode in ("earliest", "latest", "mid"):
-        match, n, bad = 0, 0, []
-        for i in idx:
-            a = ai_credit_at(df, i, mode)
-            if a["computed"] is None:       # 로그 시작 전 가격이 없어 계산 불가 — 비교 제외
-                continue
-            n += 1
-            want = df["AI신용"].iloc[i]
-            if a["computed"] == want:
-                match += 1
-            else:
-                bad.append((df["수집일"].iloc[i].strftime("%Y-%m-%d"), want, a["computed"], a["crwv_1m_pct"], a["orcl_1m_pct"]))
-        out[mode] = {"n": n, "match": match, "mismatch": bad, "skipped": len(idx) - n}
-    return out
+    """시트에 적힌 AI신용(백필 값)과 코드 계산값 비교. 로그 시작 전 가격이 필요한 행은 계산 불가라 제외."""
+    n = match = skipped = 0
+    bad = []
+    for i in range(len(df)):
+        want = df["AI신용"].iloc[i]
+        if pd.isna(want):
+            continue
+        a = ai_credit_at(df, i)
+        if a["computed"] is None:
+            skipped += 1
+            continue
+        n += 1
+        if a["computed"] == want:
+            match += 1
+        else:
+            bad.append((df["수집일"].iloc[i].strftime("%Y-%m-%d"), want, a["computed"], a["crwv_1m_pct"], a["orcl_1m_pct"]))
+    return {"n": n, "match": match, "skipped": skipped, "mismatch": bad}
 
 
 def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
@@ -318,11 +313,23 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     indicators = {k: indicator_stats(df, spec, latest_date, k) for k, spec in INDICATORS.items()}
     prov, conf = latest["잠정판정"], latest["확정판정"]
 
-    extras = {k: indicator_stats(df, spec, latest_date, k) for k, spec in EXTRAS.items()}
-    hy, ccc = indicators["HY_OAS"]["current"], extras["CCC"]["current"]
-    extras["CCC"]["gap_vs_hy"] = None if hy is None or ccc is None else round(ccc - hy, 2)   # 약한 고리 스트레스 폭
-    n = len(df) - 1
-    ai = ai_credit_at(df, n)
+    # 보조 지표: 최신 수집 행이 비어 있을 수 있어(수집 스킬이 아직 안 채우는 열) '값이 있는 마지막 행' 기준으로 낸다
+    extras = {}
+    for k, spec in EXTRAS.items():
+        valid = df[df[spec["col"]].notna()]
+        if valid.empty:
+            extras[k] = {**indicator_stats(df, spec, latest_date, k), "as_of": None}
+            continue
+        extras[k] = {**indicator_stats(valid, spec, valid["수집일"].iloc[-1], k), "as_of": valid["수집일"].iloc[-1].strftime("%Y-%m-%d")}
+    ccc_date = extras["CCC"]["as_of"]
+    hy_row = df[df["수집일"] == pd.Timestamp(ccc_date)] if ccc_date else df.iloc[0:0]
+    hy_at = _f(hy_row["HY OAS(%)"].iloc[0]) if not hy_row.empty else None
+    ccc = extras["CCC"]["current"]
+    extras["CCC"]["gap_vs_hy"] = None if hy_at is None or ccc is None else round(ccc - hy_at, 2)   # CCC − HY: 약한 고리 스트레스 폭
+
+    both = df[df["CRWV"].notna() & df["ORCL"].notna()]
+    ai = ai_credit_at(df, int(both.index[-1])) if not both.empty else ai_credit_at(df, len(df) - 1)
+    ai["as_of"] = both["수집일"].iloc[-1].strftime("%Y-%m-%d") if not both.empty else None
     sheet_ai = None if pd.isna(latest["AI신용"]) else str(latest["AI신용"])
     ai["verdict"] = sheet_ai or ai["computed"]
     ai["source"] = "시트" if sheet_ai else ("계산" if ai["computed"] else None)
@@ -398,12 +405,10 @@ def main(argv=None) -> int:
     if data["stale"]:
         print(f"경고: 최신 데이터가 {data['days_since_as_of']}일 전이다", file=sys.stderr)
     chk = ai_credit_check(df)
-    if chk["latest"]["n"]:
-        print("AI신용 검증(시트 값 vs 계산, 계산 가능한 행만): " + " · ".join(
-            f"{m} {v['match']}/{v['n']}" for m, v in chk.items()) + f" (계산 불가 {chk['latest']['skipped']}행 제외)")
-        for m, v in chk.items():
-            for d, want, got, cp, op in v["mismatch"][:8]:
-                print(f"  [{m}] 불일치 {d}: 시트 {want} / 계산 {got} (CRWV {cp}%, ORCL {op}%)")
+    if chk["n"]:
+        print(f"AI신용 검증(시트 값 vs 계산): {chk['match']}/{chk['n']} 일치 (계산 불가 {chk['skipped']}행 제외)")
+        for d, want, got, cp, op in chk["mismatch"][:8]:
+            print(f"  불일치 {d}: 시트 {want} / 계산 {got} (CRWV {cp}%, ORCL {op}%)")
     if not args.no_llm:
         import llm
         llm.run(data, args.out, force=args.force_llm)   # 실패해도 빌드는 성공 (직전 해석 유지)

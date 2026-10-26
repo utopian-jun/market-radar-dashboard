@@ -99,6 +99,16 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class LlmPayloadTest(unittest.TestCase):
+    def test_payload_carries_ccc_and_ai_credit(self):
+        import llm
+        d = {"extras": {"CCC": {"current": 13.4, "as_of": "2026-10-22", "change_30d": 2.65, "gap_vs_hy": 10.0, "percentile": 100.0, "mean": 9.66}},
+             "ai_credit": {"verdict": "🔴", "crwv_1m_pct": -37.58, "orcl_1m_pct": -12.73, "as_of": "2026-10-23", "rules": {}}}
+        self.assertEqual(llm._ccc(d)["gap_vs_hy"], 10.0)
+        self.assertEqual(llm._ai(d)["verdict"], "🔴")
+        self.assertIsNone(llm._ccc({})); self.assertIsNone(llm._ai({}))     # 이전 형식 data.json도 깨지지 않는다
+
+
 class AiCreditTest(unittest.TestCase):
     def test_rule_matches_sheet_formula(self):
         v = build.ai_verdict
@@ -113,11 +123,11 @@ class AiCreditTest(unittest.TestCase):
         df = pd.DataFrame({"수집일": days, "CRWV": [100.0 - i for i in range(len(days))], "ORCL": 200.0, "AI신용": pd.NA})
         return df
 
-    def test_one_month_reference_window_modes(self):
-        df = self._df(); i = len(df) - 1                    # 2026-10-26, 창 = 09-21 ~ 09-28
-        e = build.one_month_pct(df, "CRWV", i, "earliest")[1]
-        l = build.one_month_pct(df, "CRWV", i, "latest")[1]
-        self.assertEqual((e.strftime("%m-%d"), l.strftime("%m-%d")), ("09-21", "09-28"))
+    def test_reference_is_first_trading_day_on_or_after_30_days_back(self):
+        df = self._df(); i = len(df) - 1                    # 2026-10-26 → 30일 전 = 09-26
+        self.assertEqual(build.one_month_pct(df, "CRWV", i)[1].strftime("%m-%d"), "09-26")
+        gap = df[df["수집일"] != "2026-09-26"].reset_index(drop=True)   # 09-26 휴장이면 다음 거래일(09-27)
+        self.assertEqual(build.one_month_pct(gap, "CRWV", len(gap) - 1)[1].strftime("%m-%d"), "09-27")
 
     def test_no_reference_data_gives_none(self):
         df = self._df().iloc[-5:].reset_index(drop=True)    # 한 달 전 데이터 없음
@@ -127,7 +137,7 @@ class AiCreditTest(unittest.TestCase):
     def test_check_counts_matches_against_sheet_values(self):
         df = self._df()
         i = len(df) - 1
-        want = build.ai_credit_at(df, i, "latest")["computed"]
+        want = build.ai_credit_at(df, i)["computed"]
         df.loc[i, "AI신용"] = want
         chk = build.ai_credit_check(df)
-        self.assertEqual((chk["latest"]["n"], chk["latest"]["match"]), (1, 1))
+        self.assertEqual((chk["n"], chk["match"]), (1, 1))
