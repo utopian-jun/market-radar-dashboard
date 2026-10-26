@@ -21,6 +21,7 @@ class LlmTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         os.environ["GEMINI_API_KEY"] = "test-key"
+        llm.RETRY_WAITS = (0, 0, 0)         # 테스트에서는 기다리지 않는다
 
     def run_llm(self, caller, **kw):
         return llm.run(DATA, self.tmp, caller=caller, **kw)
@@ -59,8 +60,9 @@ class LlmTest(unittest.TestCase):
     def test_failure_keeps_previous_with_badge(self):
         self.run_llm(caller_returning(json.dumps(GOOD)))
         newer = dict(DATA, as_of="2099-01-01")
-        c = caller_returning("x", "y")
+        c = caller_returning("x", "y", "z")
         self.assertEqual(llm.run(newer, self.tmp, caller=c), "failed")
+        self.assertEqual(c.call_count, 3)
         out = json.load(open(os.path.join(self.tmp, "commentary.json"), encoding="utf-8"))
         self.assertTrue(out["update_failed"])
         self.assertEqual(out["as_of"], DATA["as_of"])      # 직전 해석 유지

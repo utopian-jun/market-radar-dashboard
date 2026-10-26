@@ -9,12 +9,14 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 KEYS = ["HY_OAS", "VIX", "US10Y", "WTI", "DXY", "FEAR_GREED", "PC_TOTAL", "PC_EQUITY"]
 TOLERANCE = 0.01          # 입력값 대비 ±1%
+RETRY_WAITS = (0, 10, 30)    # 시도 전 대기(초). 503 같은 일시 과부하는 잠깐 쉬었다 다시 부르면 대개 풀린다
 CONTEXT_NUMBERS = {1, 2, 3, 4, 5, 10, 30, 200}   # '30일', '5일 평균' 같은 문맥 숫자
 
 SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이다. 규칙:
@@ -213,7 +215,9 @@ def run(data: dict, out_dir: str, *, force: bool = False, caller=call_gemini) ->
     payload = build_payload(data)
     allowed = allowed_numbers(payload)
     result, last_err = None, None
-    for attempt in (1, 2):          # JSON/호출 실패 시 1회 재시도
+    for attempt, wait in enumerate(RETRY_WAITS, 1):     # JSON/호출 실패 시 대기 후 재시도
+        if wait:
+            time.sleep(wait)
         try:
             result, warns = validate(json.loads(caller(payload, model, api_key)), allowed)
             for w in warns:
@@ -221,7 +225,7 @@ def run(data: dict, out_dir: str, *, force: bool = False, caller=call_gemini) ->
             break
         except Exception as e:      # noqa: BLE001 — 어떤 실패든 직전 해석 유지로 처리
             last_err = e
-            print(f"해석 생성 실패 ({attempt}/2): {str(e)[:200]}", file=sys.stderr)
+            print(f"해석 생성 실패 ({attempt}/{len(RETRY_WAITS)}): {str(e)[:200]}", file=sys.stderr)
 
     if result is None:
         if prev:                    # 직전 해석 유지 + 실패 배지
