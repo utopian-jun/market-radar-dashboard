@@ -26,11 +26,12 @@ FRED = {  # 열 → FRED 시리즈
     "VIX": "VIXCLS",
     "US10Y(%)": "DGS10",
     "WTI($)": "DCOILWTICO",
+    "CCC OAS(%)": "BAMLH0A3HYC",
 }
-YF = {"DXY": "DX-Y.NYB", "SPY": "SPY", "원달러": "KRW=X"}
+YF = {"DXY": "DX-Y.NYB", "SPY": "SPY", "원달러": "KRW=X", "CRWV": "CRWV", "ORCL": "ORCL"}
 MA_WINDOW = 200
 EMPTY_BY_DESIGN = ["공포탐욕", "공포탐욕 기준일", "풋콜 Total", "풋콜 Equity", "풋콜 Equity 5일평균", "CBOE 기준일",
-                   "잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "거시경고수"]
+                   "잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "거시경고수", "AI신용"]
 
 
 # ── 수집 (네트워크) ───────────────────────────────────────
@@ -79,7 +80,7 @@ def assemble(series: dict[str, pd.Series], start: date, end: date, exclude: set[
     out["수집일"] = frame.index.strftime("%Y-%m-%d")
     out["출처"] = "백필"
     out = out[COLUMNS]
-    for c in ("HY OAS(%)", "US10Y(%)", "VIX", "WTI($)", "DXY", "SPY", "SPY 200일선", "원달러"):
+    for c in ("HY OAS(%)", "US10Y(%)", "VIX", "WTI($)", "DXY", "SPY", "SPY 200일선", "원달러", "CCC OAS(%)", "CRWV", "ORCL"):
         out[c] = pd.to_numeric(out[c], errors="coerce").round(2)
     return out.reset_index(drop=True)
 

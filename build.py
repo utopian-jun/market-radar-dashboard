@@ -16,14 +16,17 @@ from datetime import date, datetime, timezone
 
 import pandas as pd
 
-# ── 스키마 (레이더로그 A~W, 변경 금지) ─────────────────────────────
+# ── 스키마 (레이더로그 A~AA 27열, 변경 금지) ─────────────────────────────
 COLUMNS = [
     "수집일", "HY OAS(%)", "VIX", "US10Y(%)", "WTI($)", "DXY", "공포탐욕", "공포탐욕 기준일",
     "풋콜 Total", "풋콜 Equity", "풋콜 Equity 5일평균", "CBOE 기준일", "잠정판정", "확정판정",
     "추세", "신용", "변동성", "심리", "거시경고수", "SPY", "SPY 200일선", "원달러", "출처",
+    "CCC OAS(%)", "AI신용", "CRWV", "ORCL",    # X~AA — 보강 패치 v1.1
 ]
+# 이전 형식 헤더(새 열이 아직 없는 시트)도 임시로 받는다: 없는 뒤쪽 열은 빈칸으로 본다
+LEGACY_WIDTHS = (22, 23)
 DATE_COLS = ["수집일", "공포탐욕 기준일", "CBOE 기준일"]
-TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "출처"]
+TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "출처", "AI신용"]
 BACKFILL = "백필"   # 출처 열 값: 백필 / 수집(빈칸도 수집으로 본다)
 NUM_COLS = [c for c in COLUMNS if c not in DATE_COLS + TEXT_COLS]
 
@@ -39,6 +42,15 @@ INDICATORS = {
     "PC_TOTAL":   {"col": "풋콜 Total",           "label": "풋콜 Total",  "thresholds": [0.8, 1.1]},
     "PC_EQUITY":  {"col": "풋콜 Equity 5일평균",   "label": "풋콜 Equity", "thresholds": [0.55, 0.8]},
 }
+EXTRAS = {
+    "CCC":  {"col": "CCC OAS(%)", "label": "CCC OAS", "thresholds": []},
+    "CRWV": {"col": "CRWV",       "label": "CRWV",    "thresholds": []},
+    "ORCL": {"col": "ORCL",       "label": "ORCL",    "thresholds": []},
+}
+# AI 신용: CRWV·ORCL 1개월 변화율(%) 규칙 — 최종 판정에는 반영하지 않는 섹터 경보 (패치 v1.1 §3)
+AI_RULES = {"red": {"CRWV": -30, "ORCL": -20}, "yellow": {"CRWV": -15, "ORCL": -10}}
+AI_WINDOW = (28, 35)        # 1개월 전 기준: 최신일 - 35일 ~ 28일 구간의 거래일
+AI_REF_MODE = "latest"      # 구간 안에서 어느 날을 쓰나: earliest(35일 쪽) / latest(28일 쪽) / mid
 # 확정판정 → 현금 가이드 (시트 B30과 동일하게 유지). 빈 문자열이면 화면에서 가이드 줄을 숨긴다.
 CASH_GUIDE = {
     "공격": "현금 5~10% · 추세 슬리브 한도 15%",
@@ -101,10 +113,13 @@ def _col_letter(i: int) -> str:
 
 def parse(text: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
-    if [str(c).strip() for c in df.columns] == COLUMNS[:-1]:
-        # 시트에 W1 '출처'를 아직 안 붙인 이전 형식(22열) — 전부 수집 행으로 취급
-        print("경고: 헤더에 '출처'(W열)가 없다 — 모든 행을 '수집'으로 본다. 시트 W1에 '출처' 추가 필요", file=sys.stderr)
-        df["출처"] = ""
+    got = [str(c).strip() for c in df.columns]
+    if len(got) in LEGACY_WIDTHS and got == COLUMNS[:len(got)]:
+        missing = COLUMNS[len(got):]
+        print(f"경고: 헤더가 {len(got)}열 형식이다 — 없는 열({', '.join(missing)})은 빈칸으로 본다. "
+              f"시트를 {len(COLUMNS)}열(A~{_col_letter(len(COLUMNS) - 1)})로 맞춰라", file=sys.stderr)
+        for c in missing:
+            df[c] = ""
     check_header(df)
     df.columns = COLUMNS
     df = df.apply(lambda s: s.str.strip())
@@ -233,6 +248,63 @@ def provisional_streak(df: pd.DataFrame) -> int | None:
     return n
 
 
+def one_month_pct(df: pd.DataFrame, col: str, i: int, mode: str = AI_REF_MODE):
+    """i번째 행 기준 1개월 변화율(%). 기준일은 (날짜-35일 ~ 날짜-28일) 구간의 유효한 거래일."""
+    cur = df[col].iloc[i]
+    if pd.isna(cur):
+        return None
+    t = df["수집일"].iloc[i]
+    lo, hi = t - pd.Timedelta(days=AI_WINDOW[1]), t - pd.Timedelta(days=AI_WINDOW[0])
+    win = df[(df["수집일"] >= lo) & (df["수집일"] <= hi) & df[col].notna()]
+    if win.empty:
+        return None
+    if mode == "earliest":
+        base = win.iloc[0]
+    elif mode == "latest":
+        base = win.iloc[-1]
+    else:  # mid — 구간 한가운데(31.5일 전)에 가장 가까운 날
+        target = t - pd.Timedelta(days=31.5)
+        base = win.iloc[(win["수집일"] - target).abs().argmin()]
+    return (float(cur) / float(base[col]) - 1) * 100, base["수집일"]
+
+
+def ai_verdict(crwv_pct, orcl_pct):
+    """시트 A27 수식과 같은 규칙. 둘 중 하나라도 없으면 None."""
+    if crwv_pct is None or orcl_pct is None:
+        return None
+    r, y = AI_RULES["red"], AI_RULES["yellow"]
+    if crwv_pct <= r["CRWV"] or orcl_pct <= r["ORCL"]:
+        return "🔴"
+    if crwv_pct <= y["CRWV"] or orcl_pct <= y["ORCL"]:
+        return "🟡"
+    return "🟢"
+
+
+def ai_credit_at(df: pd.DataFrame, i: int, mode: str = AI_REF_MODE) -> dict:
+    c, o = one_month_pct(df, "CRWV", i, mode), one_month_pct(df, "ORCL", i, mode)
+    cp, op = (c[0] if c else None), (o[0] if o else None)
+    return {"crwv_1m_pct": None if cp is None else round(cp, 2), "orcl_1m_pct": None if op is None else round(op, 2),
+            "crwv_ref_date": c[1].strftime("%Y-%m-%d") if c else None,
+            "orcl_ref_date": o[1].strftime("%Y-%m-%d") if o else None,
+            "computed": ai_verdict(cp, op)}
+
+
+def ai_credit_check(df: pd.DataFrame) -> dict:
+    """시트에 적힌 AI신용(백필 값)과 코드 계산값이 얼마나 같은지 — 기준일 선택 방식별."""
+    idx = [i for i in range(len(df)) if pd.notna(df["AI신용"].iloc[i])]
+    out = {}
+    for mode in ("earliest", "latest", "mid"):
+        match, bad = 0, []
+        for i in idx:
+            got, want = ai_credit_at(df, i, mode)["computed"], df["AI신용"].iloc[i]
+            if got == want:
+                match += 1
+            else:
+                bad.append((df["수집일"].iloc[i].strftime("%Y-%m-%d"), want, got))
+        out[mode] = {"n": len(idx), "match": match, "mismatch": bad}
+    return out
+
+
 def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     today = today or datetime.now(timezone.utc).astimezone().date()
     latest = df.iloc[-1]
@@ -242,8 +314,21 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     indicators = {k: indicator_stats(df, spec, latest_date, k) for k, spec in INDICATORS.items()}
     prov, conf = latest["잠정판정"], latest["확정판정"]
 
+    extras = {k: indicator_stats(df, spec, latest_date, k) for k, spec in EXTRAS.items()}
+    hy, ccc = indicators["HY_OAS"]["current"], extras["CCC"]["current"]
+    extras["CCC"]["gap_vs_hy"] = None if hy is None or ccc is None else round(ccc - hy, 2)   # 약한 고리 스트레스 폭
+    n = len(df) - 1
+    ai = ai_credit_at(df, n)
+    sheet_ai = None if pd.isna(latest["AI신용"]) else str(latest["AI신용"])
+    ai["verdict"] = sheet_ai or ai["computed"]
+    ai["source"] = "시트" if sheet_ai else ("계산" if ai["computed"] else None)
+    ai["rules"] = AI_RULES
+
     series = {
         "dates": [d.strftime("%Y-%m-%d") for d in df["수집일"]],
+        "CCC": [_f(v) for v in df["CCC OAS(%)"]],
+        "CRWV": [_f(v) for v in df["CRWV"]],
+        "ORCL": [_f(v) for v in df["ORCL"]],
         **{k: [_f(v) for v in df[spec["col"]]] for k, spec in INDICATORS.items()},
         "SPY": [_f(v) for v in df["SPY"]],
         "SPY_200MA": [_f(v) for v in df["SPY 200일선"]],
@@ -277,6 +362,8 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
             "macro_warnings": _i(latest["거시경고수"]),
         },
         "indicators": indicators,
+        "extras": extras,
+        "ai_credit": ai,
         "near_threshold": [k for k, v in indicators.items() if v["near_threshold"]],
         "latest_row": _row_json(latest),
         "series": series,
@@ -305,6 +392,12 @@ def main(argv=None) -> int:
     print(f"data.json 생성: {path} (행 {len(df)}개 = 수집 {data['collection_days']} + 백필 {data['backfill_days']}, 기준일 {data['as_of']})")
     if data["stale"]:
         print(f"경고: 최신 데이터가 {data['days_since_as_of']}일 전이다", file=sys.stderr)
+    chk = ai_credit_check(df)
+    if chk["latest"]["n"]:
+        print("AI신용 검증(시트 값 vs 계산): " + " · ".join(f"{m} {v['match']}/{v['n']}" for m, v in chk.items()))
+        for m, v in chk.items():
+            for d, want, got in v["mismatch"][:6]:
+                print(f"  [{m}] 불일치 {d}: 시트 {want} / 계산 {got}")
     if not args.no_llm:
         import llm
         llm.run(data, args.out, force=args.force_llm)   # 실패해도 빌드는 성공 (직전 해석 유지)

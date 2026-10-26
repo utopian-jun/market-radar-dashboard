@@ -66,10 +66,28 @@ class BuildMergeTest(unittest.TestCase):
         self.assertEqual(d["verdict"]["provisional_streak_days"], 2)
 
     def test_legacy_22_column_header_is_all_collected(self):
-        text = csv_of([row("2026-10-21", "20", "")]).split("\n")
-        text = "\n".join(l.rsplit(",", 1)[0] for l in text)
+        text = csv_of([row("2026-10-21", "20", "")])
+        text = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False).iloc[:, :22].to_csv(index=False)
         d = build.build_data(build.parse(text), today=date(2026, 10, 22))
         self.assertEqual((d["collection_days"], d["backfill_days"]), (1, 0))
+
+    def test_legacy_23_column_header_keeps_source_and_blanks_new_columns(self):
+        text = csv_of([row("2026-10-20", "15", "백필"), row("2026-10-21", "20", "수집")])
+        text = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False).iloc[:, :23].to_csv(index=False)
+        d = build.build_data(build.parse(text), today=date(2026, 10, 22))
+        self.assertEqual((d["collection_days"], d["backfill_days"]), (1, 1))
+        self.assertIsNone(d["extras"]["CCC"]["current"])
+
+    def test_new_columns_flow_into_extras_and_series(self):
+        r1, r2 = row("2026-10-20", "15", "백필"), row("2026-10-21", "20", "수집")
+        for r, (ccc, crwv, orcl) in ((r1, ("5.00", "100", "200")), (r2, ("6.50", "90", "190"))):
+            r[build.COLUMNS.index("CCC OAS(%)")], r[build.COLUMNS.index("CRWV")], r[build.COLUMNS.index("ORCL")] = ccc, crwv, orcl
+        r2[build.COLUMNS.index("HY OAS(%)")] = "3.5"
+        d = build.build_data(build.parse(csv_of([r1, r2])), today=date(2026, 10, 22))
+        self.assertEqual(d["extras"]["CCC"]["current"], 6.5)
+        self.assertEqual(d["extras"]["CCC"]["gap_vs_hy"], 3.0)          # CCC − HY
+        self.assertEqual(d["series"]["CRWV"], [100.0, 90.0])
+        self.assertNotIn("CRWV", d["indicators"])                         # 타일 8개에는 안 들어간다
 
     def test_wrong_header_still_fails(self):
         bad = csv_of([row("2026-10-21", "20", "")]).replace("VIX", "VXX", 1)
@@ -79,3 +97,37 @@ class BuildMergeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AiCreditTest(unittest.TestCase):
+    def test_rule_matches_sheet_formula(self):
+        v = build.ai_verdict
+        self.assertEqual(v(-30, 0), "🔴"); self.assertEqual(v(0, -20), "🔴")      # 경계값 포함(≤)
+        self.assertEqual(v(-15, 0), "🟡"); self.assertEqual(v(0, -10), "🟡")
+        self.assertEqual(v(-14.9, -9.9), "🟢")
+        self.assertEqual(v(-35, -25), "🔴")                                      # 빨강이 노랑보다 우선
+        self.assertIsNone(v(None, -5)); self.assertIsNone(v(-5, None))          # 한쪽이라도 없으면 판정 안 함
+
+    def _df(self):
+        days = pd.date_range("2026-08-01", "2026-10-26")
+        df = pd.DataFrame({"수집일": days, "CRWV": [100.0 - i for i in range(len(days))], "ORCL": 200.0, "AI신용": pd.NA})
+        return df
+
+    def test_one_month_reference_window_modes(self):
+        df = self._df(); i = len(df) - 1                    # 2026-10-26, 창 = 09-21 ~ 09-28
+        e = build.one_month_pct(df, "CRWV", i, "earliest")[1]
+        l = build.one_month_pct(df, "CRWV", i, "latest")[1]
+        self.assertEqual((e.strftime("%m-%d"), l.strftime("%m-%d")), ("09-21", "09-28"))
+
+    def test_no_reference_data_gives_none(self):
+        df = self._df().iloc[-5:].reset_index(drop=True)    # 한 달 전 데이터 없음
+        self.assertIsNone(build.one_month_pct(df, "CRWV", len(df) - 1))
+        self.assertIsNone(build.ai_credit_at(df, len(df) - 1)["computed"])
+
+    def test_check_counts_matches_against_sheet_values(self):
+        df = self._df()
+        i = len(df) - 1
+        want = build.ai_credit_at(df, i, "latest")["computed"]
+        df.loc[i, "AI신용"] = want
+        chk = build.ai_credit_check(df)
+        self.assertEqual((chk["latest"]["n"], chk["latest"]["match"]), (1, 1))
