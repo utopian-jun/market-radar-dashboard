@@ -284,15 +284,6 @@ function renderTiles(d) {
     }
     // 공포탐욕은 게이지 아래 이름이 구간 표시를 대신한다
     if (z && key !== "FEAR_GREED") { const ze = el("div", "zone", z[0]); ze.style.color = "var(--" + z[1] + ")"; t.append(ze); }
-    const chg = el("div", "chg");
-    if (s.change_30d == null) chg.textContent = "30일 변화 — (데이터 부족)";
-    else {
-      const arrow = s.change_30d > 0 ? "▲" : s.change_30d < 0 ? "▼" : "–";
-      const a = el("span", s.change_30d > 0 ? "up" : s.change_30d < 0 ? "down" : "", arrow + " " + fmt(Math.abs(s.change_30d), dec));
-      chg.append("30일 ", a);
-      if (s.change_30d_pct != null) chg.append(" (" + (s.change_30d_pct > 0 ? "+" : "") + s.change_30d_pct.toFixed(1) + "%)");
-    }
-    t.append(chg);
     const chg1 = el("div", "chg");
     if (s.change_1d == null) chg1.textContent = "전일 — (데이터 부족)";
     else {
@@ -302,6 +293,15 @@ function renderTiles(d) {
       if (s.change_1d_pct != null) chg1.append(" (" + (s.change_1d_pct > 0 ? "+" : "") + s.change_1d_pct.toFixed(1) + "%)");
     }
     t.append(chg1);
+    const chg = el("div", "chg");
+    if (s.change_30d == null) chg.textContent = "30일 변화 — (데이터 부족)";
+    else {
+      const arrow = s.change_30d > 0 ? "▲" : s.change_30d < 0 ? "▼" : "–";
+      const a = el("span", s.change_30d > 0 ? "up" : s.change_30d < 0 ? "down" : "", arrow + " " + fmt(Math.abs(s.change_30d), dec));
+      chg.append("30일 ", a);
+      if (s.change_30d_pct != null) chg.append(" (" + (s.change_30d_pct > 0 ? "+" : "") + s.change_30d_pct.toFixed(1) + "%)");
+    }
+    t.append(chg);
     if (s.near_threshold) t.append(el("div", "near", "경계선 근처 · " + s.near_threshold.threshold + "까지 " + s.near_threshold.distance_pct + "%"));
     box.append(t);
   }
