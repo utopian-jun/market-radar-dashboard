@@ -211,6 +211,10 @@ def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp, key
     prev_date = past["수집일"].iloc[-1].strftime("%Y-%m-%d") if not past.empty else None
     change = None if (cur is None or prev is None) else round(cur - prev, 4)
     change_pct = None if (change is None or not prev) else round(change / abs(prev) * 100, 2)
+    # 전일: 최신 행 직전의 유효 값
+    prev1 = _f(valid.iloc[-2]) if len(valid) >= 2 and cur is not None else None
+    change_1d = None if prev1 is None else round(cur - prev1, 4)
+    change_1d_pct = None if (change_1d is None or not prev1) else round(change_1d / abs(prev1) * 100, 2)
     pct_rank = None
     if cur is not None and len(valid) >= 2:
         pct_rank = round(float((valid <= cur).mean() * 100), 1)
@@ -222,6 +226,8 @@ def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp, key
         "prev_30d_date": prev_date,
         "change_30d": change,
         "change_30d_pct": change_pct,
+        "change_1d": change_1d,
+        "change_1d_pct": change_1d_pct,
         "mean": _f(valid.mean()) if len(valid) else None,
         "min": _f(valid.min()) if len(valid) else None,
         "max": _f(valid.max()) if len(valid) else None,
