@@ -14,7 +14,8 @@ from datetime import datetime
 
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-KEYS = ["HY_OAS", "VIX", "US10Y", "WTI", "DXY", "FEAR_GREED", "PC_TOTAL", "PC_EQUITY"]
+KEYS = ["HY_OAS", "VIX", "US10Y", "WTI", "DXY", "FEAR_GREED", "PC_TOTAL", "PC_EQUITY",
+        "MOMENTUM", "HIGH_BETA", "VIX_TERM", "CFTC"]    # 뒤 4개 = 포지셔닝 (명세 v1.0)
 TOLERANCE = 0.01          # 입력값 대비 ±1%
 RETRY_WAITS = (0, 10, 30)    # 시도 전 대기(초). 503 같은 일시 과부하는 잠깐 쉬었다 다시 부르면 대개 풀린다
 CONTEXT_NUMBERS = {1, 2, 3, 4, 5, 10, 30, 200}   # '30일', '5일 평균' 같은 문맥 숫자
@@ -30,6 +31,9 @@ SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이�
 8. 현금 가이드 문구는 화면 위쪽 카드에 이미 있으니 종합 해석에서 되풀이하지 않는다. 판정 이름은 언급해도 된다.
 10. ccc_oas가 있으면 종합에서 HY OAS와 비교해 약한 고리가 벌어지는지 한 문장 이상 말한다(gap_vs_hy는 'CCC−HY 갭'이라고 부르고 키 이름은 쓰지 않는다). ai_credit이 있으면 종합에서 한 문장으로 다루되, 시장 전체 판정에는 반영되지 않는 AI 섹터 경보임을 밝히고 기준일(as_of)이 오늘과 다르면 그 날짜를 말한다. 이 둘은 indicators가 아니라 overall에서만 다룬다.
 11. 평균·최소·최대·백분위·30일 전 값은 수집+백필 전체(history_days) 기준이다. history_days가 21 미만이면 평균·백분위는 참고용이라고 한 번 밝힌다. 백필 구간에는 판정이 없으니 판정 이력을 말하지 않는다.
+12. 포지셔닝(positioning)은 **최종 판정과 별개의 경보**로 다룬다. "포지셔닝 때문에 현금을 늘려라" 같은 매매·비중 문장은 쓰지 않는다. MOMENTUM·HIGH_BETA·VIX_TERM·CFTC 해석은 positioning 안의 값만 쓴다(모멘텀·고베타는 비율 절대값이 아니라 30일 변화율 중심으로 말한다).
+13. 종합(overall)에서 포지셔닝 판정(positioning.verdict)과 신용 층(layers.credit)을 함께 본다. 포지셔닝 🔴 + 신용 🟢/🟡이면 '펀더멘털 신용 붕괴 없이 포지션 정리로 흔들리는 장'으로, 포지셔닝 🔴 + 신용 🔴이면 '정리와 신용 악화가 겹친 국면'으로 서술할 수 있다. positioning이 null이면 포지셔닝은 언급하지 않는다.
+14. CFTC는 주간 데이터(화요일 기준·금요일 발표)라는 점과 기준일(as_of)을 문장에 밝힌다. 레버리지드 펀드는 구조적으로 S&P 선물 순매도인 경우가 많아 수준보다 1년 백분위와 4주 변화로 말한다.
 JSON으로만 답한다."""
 
 GUIDE = {  # PLAN.md 5장 해석 기준 요약
@@ -41,6 +45,10 @@ GUIDE = {  # PLAN.md 5장 해석 기준 요약
     "FEAR_GREED": "반대로 읽는 지표. 25 이하 극공포는 역발상 기회 후보(단 신용이 멀쩡할 때만), 75 이상 극탐욕은 과열 경계.",
     "PC_TOTAL": "전체 옵션 풋/콜. 1.1 이상 공포, 0.8 이하 낙관. 참고용.",
     "PC_EQUITY": "개별주 옵션 풋/콜 5일 평균, 개인 심리에 가까움. 반대로 읽기: 0.8 이상 공포(역발상), 0.55 이하 탐욕.",
+    "MOMENTUM": "최근 많이 오른 종목 묶음(MTUM) ÷ S&P500(SPY). 절대 수준보다 30일 변화를 본다. 헤지펀드 디그로싱 때 인기주(모멘텀)부터 팔려 비율이 급락. 한 달 -4% 주의, -8% 경보.",
+    "HIGH_BETA": "고베타 100종목(SPHB) ÷ 저변동 100종목(SPLV). 위험자산 선호 온도계. 30일 변화 -5% 주의, -10% 경보 = 공격에서 방어로 회전·레버리지 축소.",
+    "VIX_TERM": "VIX ÷ VIX3M. 평상시 약 0.85~0.9(콘탱고). 1.00 초과(백워데이션)면 당장의 공포가 미래보다 큰 강제 청산 국면. 0.95 이상 주의. 역전은 짧게 끝나는 경우가 많고 풀리는 시점이 단기 안정 신호가 되곤 한다.",
+    "CFTC": "CFTC 주간 보고서(TFF) 레버리지드 펀드의 지수선물 (롱-숏)÷미결제약정. 수준보다 1년 백분위와 4주 변화. 백분위 10% 이하 숏 쏠림(숏커버 연료), 90% 이상 롱 쏠림. 주 1회·약 3일 지연.",
 }
 
 RESPONSE_SCHEMA = {
@@ -75,9 +83,31 @@ def build_payload(data: dict) -> dict:
         "indicators": inds,
         "near_threshold": data["near_threshold"],
         "latest_row": data["latest_row"],
+        "positioning": _pos(data),
         "ccc_oas": _ccc(data),
         "ai_credit": _ai(data),
     }
+
+
+def _pos(data: dict):
+    """포지셔닝(AB~AH): 모멘텀·고베타·VIX 기간구조(최신·30일 전·30일 변화율·백분위) + CFTC(주간) + AH 판정 + 임계값."""
+    p = data.get("positioning")
+    if not p:
+        return None
+    r = lambda v: None if v is None else round(v, 2)
+    inds = {}
+    for k, s in (p.get("inds") or {}).items():
+        if not s:
+            continue
+        inds[k] = {"label": s["label"], "current": round(s["current"], 4), "prev_30d": None if s["prev_30d"] is None else round(s["prev_30d"], 4),
+                   "change_30d_pct": s["change_30d_pct"], "percentile": s["percentile"], "level": s.get("level"),
+                   "as_of": s.get("as_of"), "term_label": s.get("term_label"), "guide": GUIDE.get(k)}
+    cftc = {}
+    for k, c in (p.get("cftc") or {}).items():
+        if c:
+            cftc[k] = {key: c[key] for key in ("current", "prev_4w", "change_4w", "percentile_1y", "as_of")}
+    return {"verdict": p.get("verdict"), "indicators": inds,
+            "cftc": {"guide": GUIDE["CFTC"], "weekly": True, **cftc}, "thresholds": p.get("thresholds")}
 
 
 def _ccc(data: dict):

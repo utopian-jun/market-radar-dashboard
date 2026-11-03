@@ -70,6 +70,15 @@ button.theme { border: 1px solid var(--line); background: var(--card); color: va
 .aitk .nm { font-weight: 700; } .aitk .px { font-size: 20px; font-weight: 700; margin-left: 6px; }
 .aitk .ch { font-size: 13px; margin-left: 6px; }
 .aitk .asof { font-size: 11px; color: var(--muted); }
+.posnote { flex-basis: 100%; font-size: 12px; color: var(--red); }
+.tile .sub { font-size: 12px; color: var(--muted); }
+.tile .cftcrow { font-size: 13px; margin-top: 4px; }
+.tile .cftcrow b { font-size: 16px; }
+.tile .cap { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.tl { margin-top: 6px; } .tl .row { display: flex; height: 14px; gap: 0; border-radius: 4px; overflow: hidden; }
+.tl .row + .row { height: 8px; margin-top: 3px; }
+.tl .row span { flex: 1 1 0; min-width: 0; }
+.tl .lab { font-size: 11px; color: var(--muted); margin-top: 2px; display: flex; justify-content: space-between; }
 .ccc { font-size: 12px; margin-top: 8px; color: var(--muted); }
 .ccc b { color: var(--red); }
 @media (max-width: 700px) { .aigrid { grid-template-columns: 1fr; } }
@@ -141,13 +150,20 @@ footer { margin: 28px 0 8px; font-size: 12px; color: var(--muted); text-align: c
   <section id="verdict" class="card verdict tone-gray"></section>
   <section id="chips" class="chips"></section>
   <section id="aistrip" class="card aistrip"></section>
+  <section id="posstrip" class="card aistrip" hidden></section>
 
-  <h2>지표 8개</h2>
+  <h2 id="tiles-h">지표 8개</h2>
   <section id="tiles" class="tiles"></section>
   <div id="collect-note" class="muted" style="font-size:12px;margin-top:6px"></div>
 
   <h2>AI 해석</h2>
   <section id="ai" class="card ai"><span class="muted">해석 준비 중 (4단계에서 연결)</span></section>
+
+  <section id="timeline" class="card" hidden>
+    <div style="font-size:13px;font-weight:700">판정 타임라인</div>
+    <div class="tl" id="tl"></div>
+    <div class="muted" style="font-size:11px;margin-top:6px">위: 확정판정 · 아래(얇은 띠): 포지셔닝 🟢🟡🔴 (백필 구간은 비어 있음)</div>
+  </section>
 
   <h2>지표별 그래프</h2>
   <section id="charts" class="charts"></section>
@@ -177,6 +193,7 @@ const ZONE_COLORS = {   // 구간 이름은 data.json(zone_label), 색만 여기
   PC_TOTAL:   ["amber", "gray", "blue"],
   PC_EQUITY:  ["red", "gray", "blue"],
 };
+const POS_KEYS = ["MOMENTUM", "HIGH_BETA", "VIX_TERM", "CFTC"];
 const DECIMALS = { HY_OAS: 2, VIX: 2, US10Y: 2, WTI: 2, DXY: 2, FEAR_GREED: 0, PC_TOTAL: 2, PC_EQUITY: 2 };
 const CHIPS = [["추세", "trend"], ["신용", "credit"], ["변동성", "volatility"], ["심리", "sentiment"]];
 
@@ -267,6 +284,70 @@ function renderAIStrip(d) {
     el("span", "tag", "최종 판정 미반영 · 섹터 경보" + (ai.as_of && ai.as_of !== d.as_of ? " · " + ai.as_of.slice(5) + " 기준" : "")));
 }
 
+const sgn = (v, dp = 1) => (v == null ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(dp));
+
+// 포지셔닝 띠: 최종 판정 미반영 — 점선 테두리 + 라벨
+function renderPosStrip(d) {
+  const box = $("posstrip"), p = d.positioning;
+  if (!p) { box.hidden = true; return; }
+  box.hidden = false; box.replaceChildren();
+  const i = p.inds || {}, g = (k) => (i[k] ? i[k].change_30d_pct : null), sp = (p.cftc || {}).SP;
+  const v = el("span", "v", p.verdict || "—"); v.style.color = "var(--" + chipTone(p.verdict) + ")";
+  box.append(el("span", "k", "포지셔닝"), v,
+    el("span", null, "모멘텀 30일 " + (g("MOMENTUM") == null ? "—" : sgn(g("MOMENTUM")) + "%")
+      + " · 고베타 30일 " + (g("HIGH_BETA") == null ? "—" : sgn(g("HIGH_BETA")) + "%")
+      + " · VIX/VIX3M " + (i.VIX_TERM ? fmt(i.VIX_TERM.current, 2) : "—")
+      + " · CFTC S&P " + (sp ? sp.current.toFixed(1) + "%" + (sp.as_of ? " (" + sp.as_of.slice(5) + ")" : "") : "—")),
+    el("span", "tag", "최종 판정 미반영 · 포지셔닝 경보"));
+  if (p.verdict && p.verdict.includes("🔴")) box.append(el("span", "posnote", "디그로싱 국면 — 급락 종목은 수급 노이즈 가능성부터 점검"));
+}
+
+// 포지셔닝 타일 4개 (기존 8개 뒤에)
+function renderPosTiles(d) {
+  const p = d.positioning, box = $("tiles");
+  $("tiles-h").textContent = p ? "지표 12개" : "지표 8개";
+  if (!p) return;
+  const tone = (lv) => (lv ? chipTone(lv) : "gray");
+  const mk = (name, lv, wide) => { const t = el("div", "card tile z-" + tone(lv) + (wide ? " wide" : "")); t.append(el("div", "name", name)); box.append(t); return t; };
+  for (const [k, nm] of [["MOMENTUM", "모멘텀 (MTUM/SPY)"], ["HIGH_BETA", "고베타 (SPHB/SPLV)"]]) {
+    const s = p.inds[k], t = mk(nm, s && s.level);
+    if (!s) { t.append(el("div", "val", "—"), el("div", "sub", "데이터 없음")); continue; }
+    const big = el("div", "val " + (s.change_30d_pct == null ? "" : s.change_30d_pct < 0 ? "down" : "up"), s.change_30d_pct == null ? "—" : sgn(s.change_30d_pct) + "%");
+    t.append(big, el("div", "sub", "30일 변화 · 비율 " + fmt(s.current, 3)));
+    if (s.level) { const z = el("div", "zone", s.level); t.append(z); }
+    t.append(el("div", "chg", s.as_of !== d.as_of ? s.as_of.slice(5) + " 기준" : ""));
+  }
+  const v = p.inds.VIX_TERM, tv = mk("VIX 기간구조 (VIX/VIX3M)", v && v.level);
+  if (!v) tv.append(el("div", "val", "—"));
+  else { tv.append(el("div", "val", fmt(v.current, 2)), el("div", "zone", v.term_label || ""), el("div", "sub", "1.00 넘으면 역전"));
+    tv.querySelector(".zone").style.color = "var(--" + tone(v.level) + ")"; }
+  const c = p.cftc || {}, ext = (x) => x && x.percentile_1y != null && (x.percentile_1y <= p.thresholds.CFTC.low_pct || x.percentile_1y >= p.thresholds.CFTC.high_pct);
+  const tc = mk("CFTC 레버리지드 펀드", ext(c.SP) || ext(c.NDX) ? "🟡" : null, true);
+  for (const [k, nm] of [["SP", "S&P"], ["NDX", "NDX"]]) {
+    const x = c[k], r = el("div", "cftcrow");
+    if (!x) { r.textContent = nm + " —"; tc.append(r); continue; }
+    r.append(nm + " 넷 ", el("b", null, x.current.toFixed(1) + "%"),
+      " · 4주 " + (x.change_4w == null ? "—" : sgn(x.change_4w) + "%p")
+      + " · 1년 " + (x.percentile_1y == null ? "—" : x.percentile_1y.toFixed(0) + "%")
+      + (x.as_of ? " · " + x.as_of.slice(5) : ""));
+    tc.append(r);
+  }
+  tc.append(el("div", "cap", "주간 · 화요일 기준 · 금요일 발표"));
+}
+
+// 판정 타임라인: 확정판정 띠 + 얇은 포지셔닝 띠
+function renderTimeline(d) {
+  const box = $("timeline"), tl = $("tl"), s = d.series;
+  tl.replaceChildren();
+  if (!d.positioning) { box.hidden = true; return; }
+  box.hidden = false;
+  const row = (arr, toneOf) => { const r = el("div", "row"); arr.forEach((v, i) => { const c = document.createElement("span");
+    c.style.background = "var(--" + toneOf(v) + (v ? "" : "-bg") + ")"; c.title = s.dates[i] + " " + (v || "—"); r.append(c); }); return r; };
+  tl.append(row(s.verdict, (v) => (v ? { green: "green", gray: "gray", amber: "amber", blue: "blue", red: "red" }[VERDICT_TONE[v]] || "gray" : "gray")),
+    row(s.positioning, (v) => (v ? chipTone(v) : "gray")));
+  const lab = el("div", "lab"); lab.append(el("span", null, s.dates[0]), el("span", null, s.dates[s.dates.length - 1])); tl.append(lab);
+}
+
 function renderTiles(d) {
   const box = $("tiles");
   box.replaceChildren();
@@ -337,12 +418,24 @@ const DESC = {
     "약 0.6~0.7",
     "반대로 읽기. 5일 평균 0.8 이상 공포(역발상), 0.55 이하 탐욕. 하루치는 소음이 커서 5일 평균으로 판정."],
 };
+DESC.MOMENTUM = ["최근 많이 오른 종목 묶음(MTUM ETF) ÷ S&P500(SPY). 오르면 모멘텀 우위.",
+  "절대 수준보다 30일 변화를 본다",
+  "헤지펀드가 디그로싱(롱·숏 동시 축소)하면 가장 많이 들고 있던 인기주(=모멘텀)부터 판다 → 이 비율이 급락. 한 달 −4% 🟡, −8% 🔴. 출처: MTUM·SPY = GOOGLEFINANCE."];
+DESC.HIGH_BETA = ["고베타 100종목 ETF(SPHB) ÷ 저변동 100종목 ETF(SPLV).",
+  "30일 변화를 본다 (비율 절대값은 의미가 약함)",
+  "위험자산 선호의 온도계. 급락 = '공격 → 방어' 회전, 레버리지 축소. 한 달 −5% 🟡, −10% 🔴. 출처: SPHB·SPLV = GOOGLEFINANCE."];
+DESC.VIX_TERM = ["30일 예상 변동성(VIX) ÷ 3개월 예상 변동성(VIX3M).",
+  "평상시 약 0.85~0.9 (콘탱고)",
+  "1을 넘으면(백워데이션) 당장의 공포가 미래보다 크다 = 강제 청산·마진콜 국면. 역사적으로 역전은 짧게 끝나는 경우가 많고, 역전이 풀리는 시점이 단기 안정의 신호가 되곤 한다. 출처: VIX3M = CBOE."];
+DESC.CFTC = ["미 상품선물거래위원회(CFTC) 주간 보고서(TFF)에서 헤지펀드·CTA 등 'Leveraged Money'의 지수선물 (롱−숏) ÷ 미결제약정.",
+  "구조적으로 S&P 선물 순매도인 경우가 많음 → 수준보다 1년 백분위와 4주 변화",
+  "백분위 10% 이하 = 숏 쏠림(숏커버 랠리 연료), 90% 이상 = 롱 쏠림(추가 매수 여력 적음). PB 넷 레버리지의 공개 대용. 주 1회·약 3일 지연. 출처: CFTC Traders in Financial Futures."];
 const EXTRA_KEYS = ["CCC", "CRWV", "ORCL"];
 const RANGES = [["1M", 30], ["3M", 91], ["6M", 182], ["전체", null]];
 const charts = new Map();   // key → Chart
 let DATA = null;
 
-const statOf = (key) => DATA.indicators[key] || DATA.extras[key];   // 지표 8개 + 보조(CCC·CRWV·ORCL)
+const statOf = (key) => DATA.indicators[key] || DATA.extras[key] || (DATA.positioning && DATA.positioning.inds[key]);   // 지표 8개 + 보조(CCC·CRWV·ORCL)
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 function sliceRange(d, key, days) {
@@ -357,7 +450,57 @@ function sliceRange(d, key, days) {
   return { labels: dates.slice(start), vals: vals.slice(start), src: (d.series.source || []).slice(start) };
 }
 
+// 포지셔닝 차트 4종
+const vixShade = { id: "vixShade", beforeDatasetsDraw(ch) {   // VIX/VIX3M 1.00 위 구간 배경을 붉게
+  if (!ch.options.plugins.vixShade) return;
+  const { ctx, chartArea: a, scales: { y } } = ch, py = Math.max(a.top, Math.min(a.bottom, y.getPixelForValue(1)));
+  if (py <= a.top) return;
+  ctx.save(); ctx.fillStyle = css("--red"); ctx.globalAlpha = 0.12; ctx.fillRect(a.left, a.top, a.right - a.left, py - a.top); ctx.restore(); } };
+
+function drawPos(key, days) {
+  const canvas = document.getElementById("cv-" + key), P = DATA.positioning, T = P.thresholds;
+  const base = sliceRange(DATA, key === "CFTC" ? "CFTC_SP" : key, days), labels = base.labels;
+  const line = css("--text"), muted = css("--muted"), grid = css("--line"), amber = css("--amber"), red = css("--red"), blue = css("--blue");
+  const dash = (data, color, d = [5, 4]) => ({ data, borderColor: color, borderDash: d, borderWidth: 1.2, pointRadius: 0, order: 1 });
+  const flat = (v) => labels.map(() => v);
+  let datasets = [], scales = { x: { ticks: { color: muted, maxTicksLimit: innerWidth >= 700 ? 10 : 5, maxRotation: 0 }, grid: { display: false } },
+    y: { ticks: { color: muted }, grid: { color: grid } } }, plugins = {}, nValid;
+  const faint = css("--gray"), isBf = (i) => base.src[i] === "백필";
+  if (key === "MOMENTUM" || key === "HIGH_BETA") {
+    const t = T[key], chg = sliceRange(DATA, key + "_CHG30", days).vals;
+    nValid = base.vals.filter((v) => v != null).length;
+    datasets = [
+      { type: "bar", label: "30일 변화율(%)", tip: true, data: chg, yAxisID: "y1", order: 3, barPercentage: 0.6, categoryPercentage: 1, maxBarThickness: 5,
+        backgroundColor: chg.map((v) => (v != null && v <= t.yellow ? red + "bb" : css("--gray") + "44")), },
+      { label: DATA.positioning.inds[key].label, tip: true, data: base.vals, borderColor: line, backgroundColor: line, borderWidth: 2, pointRadius: 0,
+        pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0, segment: { borderColor: (c) => (isBf(c.p1DataIndex) ? faint : line) } },
+      { ...dash(flat(t.yellow), amber), yAxisID: "y1" }, { ...dash(flat(t.red), red), yAxisID: "y1" }];
+    scales.y1 = { position: "right", ticks: { color: muted, callback: (v) => v + "%" }, grid: { drawOnChartArea: false } };
+  } else if (key === "VIX_TERM") {
+    const t = T.VIX_TERM; nValid = base.vals.filter((v) => v != null).length;
+    datasets = [{ label: "VIX/VIX3M", tip: true, data: base.vals, borderColor: line, backgroundColor: line, borderWidth: 2, pointRadius: nValid < 8 ? 4 : 0,
+      pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0, segment: { borderColor: (c) => (isBf(c.p1DataIndex) ? faint : line) } },
+      { data: flat(t.red), borderColor: red, borderWidth: 1.6, pointRadius: 0, order: 1 }, dash(flat(t.yellow), amber)];
+    plugins.vixShade = true;
+  } else {   // CFTC: 주간 점+선 — 빈 날짜는 선으로 잇되 점은 발표일에만
+    const sp = base.vals, ndx = sliceRange(DATA, "CFTC_NDX", days).vals, c = P.cftc || {};
+    nValid = sp.filter((v) => v != null).length + ndx.filter((v) => v != null).length;
+    const mk = (nm, vals, color) => ({ label: nm, tip: true, data: vals, borderColor: color, backgroundColor: color, borderWidth: 2, spanGaps: true, tension: 0,
+      pointRadius: (cx) => (vals[cx.dataIndex] != null ? 3.5 : 0), pointHoverRadius: 5, order: 0 });
+    datasets = [mk("S&P 넷%OI", sp, line), mk("NDX 넷%OI", ndx, blue)];
+    for (const [k, color] of [["SP", line], ["NDX", blue]]) if (c[k] && c[k].band_low != null) {
+      datasets.push(dash(flat(c[k].band_low), color, [2, 4]), dash(flat(c[k].band_high), color, [2, 4])); }
+    scales.y.ticks.callback = (v) => v + "%";
+  }
+  canvas.parentElement.classList.toggle("sparse", nValid < 2);
+  const old = charts.get(key); if (old) old.destroy();
+  charts.set(key, new Chart(canvas, { type: "line", data: { labels, datasets }, plugins: [vixShade],
+    options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { filter: (i) => i.dataset.tip === true }, ...plugins }, scales } }));
+}
+
 function drawChart(key, days) {
+  if (POS_KEYS.includes(key)) return drawPos(key, days);
   const s = statOf(key), canvas = document.getElementById("cv-" + key);
   const { labels, vals, src } = sliceRange(DATA, key, days);
   const isBf = (i) => src[i] === "백필";
@@ -435,7 +578,52 @@ function renderCharts(d) {
     box.append(card);
     drawChart(key, null);
   }
+  renderPosCharts(d, box);
   renderAICard(d, box);
+}
+
+function renderPosCharts(d, box) {
+  const P = d.positioning; if (!P) return;
+  const META = {
+    MOMENTUM: ["모멘텀 MTUM/SPY", "┄ 30일 변화율 −4%(주의) · −8%(경보) · 막대 = 30일 변화율(오른쪽 축)"],
+    HIGH_BETA: ["고베타 SPHB/SPLV", "┄ 30일 변화율 −5%(주의) · −10%(경보) · 막대 = 30일 변화율(오른쪽 축)"],
+    VIX_TERM: ["VIX 기간구조 VIX/VIX3M", "━ 1.00 역전 기준(위쪽 붉은 배경) · ┄ 0.95 주의"],
+    CFTC: ["CFTC 레버리지드 펀드 (넷%OI)", "점 = 발표일(주 1회) · ┄ 점선 = 각 지수의 최근 1년 10%·90% 위치 · 검정 S&P / 파랑 NDX"],
+  };
+  for (const key of POS_KEYS) {
+    const card = el("div", "card gcard"), top = el("div", "gtop"), s = P.inds[key], c = P.cftc || {};
+    let cur = "—";
+    if (key === "CFTC") cur = "S&P " + (c.SP ? c.SP.current.toFixed(1) + "%" : "—") + " · NDX " + (c.NDX ? c.NDX.current.toFixed(1) + "%" : "—");
+    else if (s) cur = key === "VIX_TERM" ? fmt(s.current, 2) : (s.change_30d_pct == null ? "—" : sgn(s.change_30d_pct) + "% (30일)");
+    top.append(el("span", "name", META[key][0]), el("span", "cur", cur));
+    const rg = el("div", "range");
+    RANGES.forEach(([label, days], i) => {
+      const b = el("button", i === RANGES.length - 1 ? "on" : "", label); b.type = "button";
+      b.addEventListener("click", () => { rg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); drawChart(key, days); });
+      rg.append(b);
+    });
+    const plot = el("div", "plot"), cv = document.createElement("canvas"); cv.id = "cv-" + key;
+    plot.append(cv, el("div", "empty", "데이터 쌓이는 중 — 점 2개부터 선이 그려진다"));
+    const st = el("div", "stats"), cell = (k, v) => { const x = el("div", null, v); x.prepend(el("span", null, k)); st.append(x); };
+    if (key === "CFTC") {
+      for (const [k, nm] of [["SP", "S&P"], ["NDX", "NDX"]]) { const x = c[k];
+        cell(nm + " 4주 변화", x && x.change_4w != null ? sgn(x.change_4w) + "%p" : "—");
+        cell(nm + " 1년 백분위", x && x.percentile_1y != null ? x.percentile_1y.toFixed(0) + "%" : "—"); }
+    } else if (s) {
+      const dec = key === "VIX_TERM" ? 2 : 3;
+      cell("평균", fmt(s.mean, dec)); cell("최소", fmt(s.min, dec)); cell("최대", fmt(s.max, dec));
+      cell("백분위", s.n >= 2 && s.percentile != null ? s.percentile.toFixed(0) + "%" : "—");
+    }
+    const gl = el("div", "gline"); gl.dataset.key = key;
+    const det = el("details", "desc"), [what, avg, interp] = DESC[key];
+    det.append(el("summary", null, "지표 설명"));
+    const dl = el("dl");
+    [["무엇인가", what], ["참고", avg], ["해석", interp]].forEach(([k, v]) => dl.append(el("dt", null, k), el("dd", null, v)));
+    det.append(dl);
+    card.append(top, rg, plot, el("div", "legend", META[key][1] + (d.backfill_days && key !== "CFTC" ? " · 연한 선 = 백필" : "")), st, gl, det);
+    box.append(card);
+    drawChart(key, null);
+  }
 }
 
 // CRWV·ORCL 소형 카드 (AI 신용 감시): 1개월 변화 위주
@@ -489,7 +677,7 @@ async function renderCommentary() {
     const r = await fetch("data.json", { cache: "no-store" });
     if (!r.ok) throw new Error("data.json " + r.status);
     const d = await r.json();
-    renderHeader(d); renderVerdict(d); renderChips(d); renderTiles(d); renderCharts(d);
+    renderHeader(d); renderVerdict(d); renderChips(d); renderPosStrip(d); renderTiles(d); renderPosTiles(d); renderTimeline(d); renderCharts(d);
     renderCommentary();
   } catch (e) {
     const b = $("error"); b.hidden = false;

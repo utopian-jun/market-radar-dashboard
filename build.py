@@ -22,11 +22,12 @@ COLUMNS = [
     "풋콜 Total", "풋콜 Equity", "풋콜 Equity 5일평균", "CBOE 기준일", "잠정판정", "확정판정",
     "추세", "신용", "변동성", "심리", "거시경고수", "SPY", "SPY 200일선", "원달러", "출처",
     "CCC OAS(%)", "AI신용", "CRWV", "ORCL",    # X~AA — 보강 패치 v1.1
+    "MTUM/SPY", "SPHB/SPLV", "VIX/VIX3M", "CFTC S&P 넷%OI", "CFTC NDX 넷%OI", "CFTC 기준일", "포지셔닝",   # AB~AH — 포지셔닝 명세 v1.0
 ]
 # 이전 형식 헤더(새 열이 아직 없는 시트)도 임시로 받는다: 없는 뒤쪽 열은 빈칸으로 본다
-LEGACY_WIDTHS = (22, 23)
-DATE_COLS = ["수집일", "공포탐욕 기준일", "CBOE 기준일"]
-TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "출처", "AI신용"]
+LEGACY_WIDTHS = (22, 23, 27)
+DATE_COLS = ["수집일", "공포탐욕 기준일", "CBOE 기준일", "CFTC 기준일"]
+TEXT_COLS = ["잠정판정", "확정판정", "추세", "신용", "변동성", "심리", "출처", "AI신용", "포지셔닝"]
 BACKFILL = "백필"   # 출처 열 값: 백필 / 수집(빈칸도 수집으로 본다)
 NUM_COLS = [c for c in COLUMNS if c not in DATE_COLS + TEXT_COLS]
 
@@ -51,6 +52,19 @@ EXTRAS = {
 AI_RULES = {"red": {"CRWV": -30, "ORCL": -20}, "yellow": {"CRWV": -15, "ORCL": -10}}
 AI_WINDOW = (28, 35)        # 1개월 전 기준일은 최신일 - 35일 ~ 28일 안의 거래일
 AI_REF_DAYS = 30            # 그중 (날짜 - 30일) 이후 첫 거래일을 쓴다 — 시트 백필 값과 247/249 일치하는 규칙
+# 포지셔닝 임계값 — 출발값. 바꿀 때는 여기 한곳만 고친다 (화면·AI 해석이 data.json의 thresholds를 읽는다)
+POS = {
+    "MOMENTUM":  {"yellow": -4.0, "red": -8.0},     # MTUM/SPY 30일 변화율(%) 이하
+    "HIGH_BETA": {"yellow": -5.0, "red": -10.0},    # SPHB/SPLV 30일 변화율(%) 이하
+    "VIX_TERM":  {"yellow": 0.95, "red": 1.00},     # VIX/VIX3M 이상 (1.00 = 역전)
+    "CFTC":      {"low_pct": 10, "high_pct": 90, "weeks_back": 4, "window_days": 365},   # 1년 백분위 양끝
+}
+POS_DAILY = {
+    "MOMENTUM":  {"col": "MTUM/SPY",  "label": "모멘텀 MTUM/SPY",   "thresholds": []},
+    "HIGH_BETA": {"col": "SPHB/SPLV", "label": "고베타 SPHB/SPLV",  "thresholds": []},
+    "VIX_TERM":  {"col": "VIX/VIX3M", "label": "VIX 기간구조",       "thresholds": [POS["VIX_TERM"]["yellow"], POS["VIX_TERM"]["red"]]},
+}
+POS_CFTC = {"SP": "CFTC S&P 넷%OI", "NDX": "CFTC NDX 넷%OI"}
 # 확정판정 → 현금 가이드 (시트 B30과 동일하게 유지). 빈 문자열이면 화면에서 가이드 줄을 숨긴다.
 CASH_GUIDE = {
     "공격": "현금 5~10% · 추세 슬리브 한도 15%",
@@ -310,6 +324,76 @@ def ai_credit_check(df: pd.DataFrame) -> dict:
     return {"n": n, "match": match, "skipped": skipped, "mismatch": bad}
 
 
+def _lvl_drop(chg, t):
+    """30일 변화율(%)이 임계 이하로 떨어졌으면 🟡/🔴."""
+    if chg is None:
+        return None
+    return "🔴" if chg <= t["red"] else "🟡" if chg <= t["yellow"] else "🟢"
+
+
+def chg30_series(df: pd.DataFrame, col: str) -> list:
+    """행마다 30일 변화율(%): 날짜-30일 이하 중 가장 가까운 유효 값 대비. 기준이 없으면 None. (ffill 아님 — 비교 기준만 찾는다)"""
+    v = df[["수집일", col]].dropna()
+    if v.empty:
+        return [None] * len(df)
+    left = df[["수집일"]].assign(_t=df["수집일"] - pd.Timedelta(days=30)).sort_values("_t")
+    base = pd.merge_asof(left, v.rename(columns={"수집일": "_bd", col: "_base"}).sort_values("_bd"),
+                         left_on="_t", right_on="_bd", direction="backward").sort_index()
+    out = []
+    for i in range(len(df)):
+        cur, b = df[col].iloc[i], base["_base"].iloc[i]
+        out.append(None if pd.isna(cur) or pd.isna(b) or not b else round((float(cur) / float(b) - 1) * 100, 2))
+    return out
+
+
+def cftc_stats(df: pd.DataFrame, col: str) -> dict | None:
+    """주간 열: 마지막 비어 있지 않은 값 + 기준일. 4주 전(유효 값 4개 앞) 대비 변화, 최근 1년 백분위와 10/90% 위치."""
+    cfg = POS["CFTC"]
+    v = df[df[col].notna()]
+    if v.empty:
+        return None
+    cur = float(v[col].iloc[-1])
+    last_dt = v["수집일"].iloc[-1]
+    gdate = v["CFTC 기준일"].iloc[-1]
+    win = v[v["수집일"] > last_dt - pd.Timedelta(days=cfg["window_days"])][col].astype(float)
+    prev = float(v[col].iloc[-1 - cfg["weeks_back"]]) if len(v) > cfg["weeks_back"] else None
+    return {
+        "current": round(cur, 2), "as_of": None if pd.isna(gdate) else gdate.strftime("%Y-%m-%d"),
+        "posted": last_dt.strftime("%Y-%m-%d"),
+        "prev_4w": None if prev is None else round(prev, 2),
+        "change_4w": None if prev is None else round(cur - prev, 2),
+        "percentile_1y": round(float((win <= cur).mean() * 100), 1) if len(win) >= 2 else None,
+        "band_low": round(float(win.quantile(cfg["low_pct"] / 100)), 2) if len(win) >= 2 else None,
+        "band_high": round(float(win.quantile(cfg["high_pct"] / 100)), 2) if len(win) >= 2 else None,
+        "n_1y": int(len(win)),
+    }
+
+
+def positioning_block(df: pd.DataFrame) -> dict | None:
+    """AB~AH. 새 열에 값이 하나도 없으면 None(화면에서 통째로 숨김)."""
+    cols = [s["col"] for s in POS_DAILY.values()] + list(POS_CFTC.values())
+    if not df[cols].notna().any().any():
+        return None
+    out: dict = {"thresholds": POS, "inds": {}}
+    for k, spec in POS_DAILY.items():
+        valid = df[df[spec["col"]].notna()]
+        if valid.empty:
+            out["inds"][k] = None
+            continue
+        st = {**indicator_stats(valid, spec, valid["수집일"].iloc[-1], k), "as_of": valid["수집일"].iloc[-1].strftime("%Y-%m-%d")}
+        if k == "VIX_TERM":
+            c = st["current"]
+            st["level"] = None if c is None else "🔴" if c >= POS[k]["red"] else "🟡" if c >= POS[k]["yellow"] else "🟢"
+            st["term_label"] = None if c is None else ("역전(백워데이션)" if c > POS[k]["red"] else "정상(콘탱고)")
+        else:
+            st["level"] = _lvl_drop(st["change_30d_pct"], POS[k])
+        out["inds"][k] = st
+    out["cftc"] = {k: cftc_stats(df, c) for k, c in POS_CFTC.items()}
+    ah = df["포지셔닝"].iloc[-1]
+    out["verdict"] = None if pd.isna(ah) else str(ah)
+    return out
+
+
 def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     today = today or datetime.now(timezone.utc).astimezone().date()
     latest = df.iloc[-1]
@@ -351,6 +435,14 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
         "SPY": [_f(v) for v in df["SPY"]],
         "SPY_200MA": [_f(v) for v in df["SPY 200일선"]],
         "USDKRW": [_f(v) for v in df["원달러"]],
+        "MOMENTUM": [_f(v) for v in df["MTUM/SPY"]],
+        "HIGH_BETA": [_f(v) for v in df["SPHB/SPLV"]],
+        "VIX_TERM": [_f(v) for v in df["VIX/VIX3M"]],
+        "MOMENTUM_CHG30": chg30_series(df, "MTUM/SPY"),
+        "HIGH_BETA_CHG30": chg30_series(df, "SPHB/SPLV"),
+        "CFTC_SP": [_f(v) for v in df["CFTC S&P 넷%OI"]],      # 주간: 발표일 행에만 값, 나머지는 None (ffill 안 함)
+        "CFTC_NDX": [_f(v) for v in df["CFTC NDX 넷%OI"]],
+        "positioning": [None if pd.isna(v) else str(v) for v in df["포지셔닝"]],
         "verdict": [None if pd.isna(v) else str(v) for v in df["확정판정"]],
         "source": ["백필" if b else "수집" for b in df["_bf"]],
     }
@@ -382,6 +474,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
         "indicators": indicators,
         "extras": extras,
         "ai_credit": ai,
+        "positioning": positioning_block(df),
         "near_threshold": [k for k, v in indicators.items() if v["near_threshold"]],
         "latest_row": _row_json(latest),
         "series": series,
