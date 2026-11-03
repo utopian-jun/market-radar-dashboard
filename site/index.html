@@ -470,10 +470,10 @@ function drawPos(key, days) {
     const t = T[key], chg = sliceRange(DATA, key + "_CHG30", days).vals;
     nValid = base.vals.filter((v) => v != null).length;
     datasets = [
-      { type: "bar", label: "30일 변화율(%)", tip: true, data: chg, yAxisID: "y1", order: 3, barPercentage: 0.6, categoryPercentage: 1, maxBarThickness: 5,
-        backgroundColor: chg.map((v) => (v != null && v <= t.yellow ? red + "bb" : css("--gray") + "44")), },
-      { label: DATA.positioning.inds[key].label, tip: true, data: base.vals, borderColor: line, backgroundColor: line, borderWidth: 2, pointRadius: 0,
-        pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0, segment: { borderColor: (c) => (isBf(c.p1DataIndex) ? faint : line) } },
+      { type: "bar", label: "30일 변화율(%)", tip: true, data: chg, yAxisID: "y1", order: 3, barPercentage: 0.8, categoryPercentage: 1, maxBarThickness: 6,
+        backgroundColor: chg.map((v) => (v == null ? "transparent" : v <= t.red ? red : v <= t.yellow ? amber : v < 0 ? amber + "66" : css("--green") + "88")) },
+      { label: DATA.positioning.inds[key].label, tip: true, data: base.vals, borderColor: blue, backgroundColor: blue, borderWidth: 2.5, pointRadius: 0,
+        pointHoverRadius: 5, tension: 0.15, spanGaps: true, order: 0 },
       { ...dash(flat(t.yellow), amber), yAxisID: "y1" }, { ...dash(flat(t.red), red), yAxisID: "y1" }];
     scales.y1 = { position: "right", ticks: { color: muted, callback: (v) => v + "%" }, grid: { drawOnChartArea: false } };
   } else if (key === "VIX_TERM") {
@@ -585,8 +585,8 @@ function renderCharts(d) {
 function renderPosCharts(d, box) {
   const P = d.positioning; if (!P) return;
   const META = {
-    MOMENTUM: ["모멘텀 MTUM/SPY", "┄ 30일 변화율 −4%(주의) · −8%(경보) · 막대 = 30일 변화율(오른쪽 축)"],
-    HIGH_BETA: ["고베타 SPHB/SPLV", "┄ 30일 변화율 −5%(주의) · −10%(경보) · 막대 = 30일 변화율(오른쪽 축)"],
+    MOMENTUM: ["모멘텀 MTUM/SPY", "┄ 30일 변화율 −4%(주의) · −8%(경보) · 막대 = 30일 변화율(오른쪽 축): 초록 상승 · 연한 주황 하락 · 주황 주의선 이하 · 빨강 경보선 이하 · 파란 선 = 비율"],
+    HIGH_BETA: ["고베타 SPHB/SPLV", "┄ 30일 변화율 −5%(주의) · −10%(경보) · 막대 = 30일 변화율(오른쪽 축): 초록 상승 · 연한 주황 하락 · 주황 주의선 이하 · 빨강 경보선 이하 · 파란 선 = 비율"],
     VIX_TERM: ["VIX 기간구조 VIX/VIX3M", "━ 1.00 역전 기준(위쪽 붉은 배경) · ┄ 0.95 주의"],
     CFTC: ["CFTC 레버리지드 펀드 (넷%OI)", "점 = 발표일(주 1회) · ┄ 점선 = 각 지수의 최근 1년 10%·90% 위치 · 검정 S&P / 파랑 NDX"],
   };
