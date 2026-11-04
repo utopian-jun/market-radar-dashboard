@@ -50,6 +50,10 @@ button.theme { border: 1px solid var(--line); background: var(--card); color: va
 .verdict .label { font-size: 13px; color: var(--muted); }
 .verdict .big { font-size: clamp(30px, 8vw, 46px); font-weight: 800; margin: 4px 0; }
 .verdict .guide { font-size: 16px; margin-top: 6px; }
+.verdict .upcoming { font-size: 14px; margin-top: 10px; }
+.verdict .orig { font-size: 11px; color: var(--muted); margin-top: 12px; }
+.chip .d { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.35; }
+.aistrip .desc { font-size: 12px; color: var(--muted); flex-basis: 100%; }
 .verdict .prov { font-size: 12px; color: var(--muted); margin-top: 10px; }
 .tone-green { border-color: var(--green); } .tone-green .big { color: var(--green); }
 .tone-amber { border-color: var(--amber); } .tone-amber .big { color: var(--amber); }
@@ -183,7 +187,7 @@ function el(tag, cls, text) {
 }
 
 // 확정판정 → 색 톤
-const VERDICT_TONE = { "공격": "green", "중립": "gray", "과열주의": "amber", "역발상기회": "blue", "방어": "red" };
+const VERDICT_TONE = { "공격": "green", "중립": "gray", "과열주의": "amber", "역발상기회": "green", "방어": "red" };   // 쉬운 판정 색과 동일 (표시 전용)
 
 // 지표별 구간 라벨/색 (zone 번호 = 넘긴 임계선 개수). 임계 없는 지표는 구간 표시 없음.
 const ZONE_COLORS = {   // 구간 이름은 data.json(zone_label), 색만 여기서 정한다
@@ -231,6 +235,17 @@ function gaugeSVG(value) {
 
 function fmt(v, d) { return v == null ? "—" : Number(v).toLocaleString("ko-KR", { minimumFractionDigits: d, maximumFractionDigits: d }); }
 
+// 🟢🟡🔴 옆에 글자 병기
+const LVL_TEXT = { "🟢": "좋음", "🟡": "주의", "🔴": "위험" };
+const withText = (v) => { if (v == null) return v; for (const k in LVL_TEXT) if (v.includes(k)) return v + " " + LVL_TEXT[k]; return v; };
+const CHIP_DESC = {
+  trend: "시장이 오르는 흐름인지",
+  credit: "회사들이 돈 빌리기 쉬운지 — 위험 신호가 가장 먼저 켜지는 곳",
+  volatility: "시장이 얼마나 출렁이는지",
+  sentiment: "사람들이 겁먹었는지 들떴는지 (거꾸로 읽어요 — 다들 겁먹을 때가 기회)",
+  macro: "금리·유가·달러·환율이 갑자기 튄 개수",
+};
+
 function chipTone(v) {
   if (v == null) return "gray";
   if (v.includes("🟢")) return "green";
@@ -248,29 +263,32 @@ function renderHeader(d) {
 }
 
 function renderVerdict(d) {
-  const v = d.verdict, box = $("verdict");
+  const v = d.verdict, box = $("verdict"), e = v.easy || {};
   box.replaceChildren();
-  box.className = "card verdict tone-" + (VERDICT_TONE[v.confirmed] || "gray");
-  box.append(el("div", "label", "오늘의 판정"), el("div", "big", v.confirmed || "판정 없음"));
-  if (v.cash_guide) box.append(el("div", "guide", "현금 가이드 · " + v.cash_guide));
+  box.className = "card verdict tone-" + (e.tone || VERDICT_TONE[v.confirmed] || "gray");
+  box.append(el("div", "label", "오늘의 판정"), el("div", "big", e.label || v.confirmed || "확인 중"));
+  if (e.line) box.append(el("div", "guide", e.line));
   if (v.differs) {
     const n = v.provisional_streak_days;
-    box.append(el("div", "prov", "잠정: " + v.provisional + (n ? " (유지 " + n + "일째, 10일 채우면 확정 전환)" : "")));
+    box.append(el("div", "upcoming", "다가오는 변화: " + (e.provisional_label || v.provisional) + " 신호 " + (n ? n + "일째" : "감지")
+      + " — 10일 이어지면 판정이 바뀌어요"));
   }
+  const orig = ["준 기준: " + (v.confirmed || "—")].concat(v.cash_guide ? [v.cash_guide] : []).join(" · ");
+  box.append(el("div", "orig", orig));
 }
 
 function renderChips(d) {
   const box = $("chips");
   box.replaceChildren();
-  const add = (k, v, tone) => {
+  const add = (k, v, tone, desc) => {
     const c = el("div", "card chip");
-    c.append(el("div", "k", k), el("div", "v", v == null ? "—" : v));
+    c.append(el("div", "k", k), el("div", "v", v == null ? "—" : v), el("div", "d", desc));
     c.querySelector(".v").style.color = "var(--" + tone + ")";
     box.append(c);
   };
-  for (const [label, key] of CHIPS) add(label, d.layers[key], chipTone(d.layers[key]));
+  for (const [label, key] of CHIPS) add(label, withText(d.layers[key]), chipTone(d.layers[key]), CHIP_DESC[key]);
   const w = d.layers.macro_warnings;
-  add("거시경고", w == null ? null : w + "개", w == null ? "gray" : w === 0 ? "green" : w === 1 ? "amber" : "red");
+  add("거시경고", w == null ? null : w + "개", w == null ? "gray" : w === 0 ? "green" : w === 1 ? "amber" : "red", CHIP_DESC.macro);
   renderAIStrip(d);
 }
 
@@ -278,10 +296,11 @@ function renderChips(d) {
 function renderAIStrip(d) {
   const box = $("aistrip"), ai = d.ai_credit || {}, pct = (v) => (v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%");
   box.replaceChildren();
-  const v = el("span", "v", ai.verdict || "—"); v.style.color = "var(--" + chipTone(ai.verdict) + ")";
-  box.append(el("span", "k", "AI 신용"), v,
+  const v = el("span", "v", withText(ai.verdict) || "—"); v.style.color = "var(--" + chipTone(ai.verdict) + ")";
+  box.append(el("span", "k", "AI 신용"), el("span", "badge", "참고용"), v,
     el("span", null, ai.crwv_1m_pct == null ? "CRWV·ORCL 값 없음" : "CRWV " + pct(ai.crwv_1m_pct) + " · ORCL " + pct(ai.orcl_1m_pct) + " (1개월)"),
-    el("span", "tag", "최종 판정 미반영 · 섹터 경보" + (ai.as_of && ai.as_of !== d.as_of ? " · " + ai.as_of.slice(5) + " 기준" : "")));
+    el("span", "tag", "최종 판정 미반영 · 섹터 경보" + (ai.as_of && ai.as_of !== d.as_of ? " · " + ai.as_of.slice(5) + " 기준" : "")),
+    el("span", "desc", "AI 회사 빚 위험"));
 }
 
 const sgn = (v, dp = 1) => (v == null ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(dp));
@@ -292,13 +311,14 @@ function renderPosStrip(d) {
   if (!p) { box.hidden = true; return; }
   box.hidden = false; box.replaceChildren();
   const i = p.inds || {}, g = (k) => (i[k] ? i[k].change_30d_pct : null), sp = (p.cftc || {}).SP;
-  const v = el("span", "v", p.verdict || "—"); v.style.color = "var(--" + chipTone(p.verdict) + ")";
-  box.append(el("span", "k", "포지셔닝"), v,
+  const v = el("span", "v", withText(p.verdict) || "—"); v.style.color = "var(--" + chipTone(p.verdict) + ")";
+  box.append(el("span", "k", "포지셔닝"), el("span", "badge", "참고용"), v,
     el("span", null, "모멘텀 30일 " + (g("MOMENTUM") == null ? "—" : sgn(g("MOMENTUM")) + "%")
       + " · 고베타 30일 " + (g("HIGH_BETA") == null ? "—" : sgn(g("HIGH_BETA")) + "%")
       + " · VIX/VIX3M " + (i.VIX_TERM ? fmt(i.VIX_TERM.current, 2) : "—")
       + " · CFTC S&P " + (sp ? sp.current.toFixed(1) + "%" + (sp.as_of ? " (" + sp.as_of.slice(5) + ")" : "") : "—")),
-    el("span", "tag", "최종 판정 미반영 · 포지셔닝 경보"));
+    el("span", "tag", "최종 판정 미반영 · 포지셔닝 경보"),
+    el("span", "desc", "큰손들이 급하게 주식을 줄이는지"));
   if (p.verdict && p.verdict.includes("🔴")) box.append(el("span", "posnote", "디그로싱 국면 — 급락 종목은 수급 노이즈 가능성부터 점검"));
 }
 
@@ -314,7 +334,7 @@ function renderPosTiles(d) {
     if (!s) { t.append(el("div", "val", "—"), el("div", "sub", "데이터 없음")); continue; }
     const big = el("div", "val " + (s.change_30d_pct == null ? "" : s.change_30d_pct < 0 ? "down" : "up"), s.change_30d_pct == null ? "—" : sgn(s.change_30d_pct) + "%");
     t.append(big, el("div", "sub", "30일 변화 · 비율 " + fmt(s.current, 3)));
-    if (s.level) { const z = el("div", "zone", s.level); t.append(z); }
+    if (s.level) { const z = el("div", "zone", withText(s.level)); z.style.color = "var(--" + tone(s.level) + ")"; t.append(z); }
     t.append(el("div", "chg", s.as_of !== d.as_of ? s.as_of.slice(5) + " 기준" : ""));
   }
   const v = p.inds.VIX_TERM, tv = mk("VIX 기간구조 (VIX/VIX3M)", v && v.level);
