@@ -268,9 +268,9 @@ function renderVerdict(d) {
   box.className = "card verdict tone-" + (e.tone || VERDICT_TONE[v.confirmed] || "gray");
   box.append(el("div", "label", "오늘의 판정"), el("div", "big", e.label || v.confirmed || "확인 중"));
   if (e.line) box.append(el("div", "guide", e.line));
-  if (v.differs) {
+  if (v.differs && e.provisional_label) {
     const n = v.provisional_streak_days;
-    box.append(el("div", "upcoming", "다가오는 변화: " + (e.provisional_label || v.provisional) + " 신호 " + (n ? n + "일째" : "감지")
+    box.append(el("div", "upcoming", "다가오는 변화: " + e.provisional_label + " 신호 " + (n ? n + "일째" : "감지")
       + " — 10일 이어지면 판정이 바뀌어요"));
   }
   const orig = ["준 기준: " + (v.confirmed || "—")].concat(v.cash_guide ? [v.cash_guide] : []).join(" · ");

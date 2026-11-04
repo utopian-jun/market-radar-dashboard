@@ -73,15 +73,14 @@ CASH_GUIDE = {
     "역발상기회": "현금 15~20% · 개시선 아래 종목 분할 매수 · 슬리브 0%",
     "방어": "현금 30%+ · 신규 금지 · 슬리브 0%",
 }
-# 화면용 쉬운 판정 (표시 전용 — 판정 로직·시트 값은 그대로). 한 줄 안내(line)는 시트 '시장레이더' B32 문구와 같아야 한다.
-# TODO: line 중 '방어'만 B32 원문. 나머지 5개는 임시 문구 — 원문을 받으면 여기 한곳만 교체
+# 화면용 쉬운 판정 (표시 전용 — 판정 로직·시트 값은 그대로). 한 줄 안내(line)는 시트 '시장레이더' B32 수식 문구와 같다(바꿀 때 시트와 함께).
 EASY_VERDICT = {
-    "공격":       {"label": "적극 매수",        "tone": "green", "phase": "적극적으로 사는",        "line": "시장 분위기가 좋아요. 계획한 만큼 적극적으로 사도 되는 때예요."},
-    "중립":       {"label": "천천히 분할 매수",  "tone": "gray",  "phase": "천천히 나눠 사는",      "line": "특별히 좋지도 나쁘지도 않아요. 한 번에 몰지 말고 나눠서 천천히 사요."},
-    "과열주의":   {"label": "매도 검토",        "tone": "amber", "phase": "과열을 경계하는",       "line": "시장이 들떠 있어요. 새로 사는 속도를 줄이고 팔 것을 살펴봐요."},
-    "역발상기회": {"label": "매수 기회",        "tone": "green", "phase": "다들 겁먹은 매수 기회의", "line": "다들 겁먹었지만 돈 빌리기는 아직 괜찮아요. 조건이 맞는 종목을 나눠서 사볼 때예요."},
-    "방어":       {"label": "매수 금지",        "tone": "red",   "phase": "사지 않고 지키는",      "line": "시장에 위험 신호가 켜졌어요. 새로 사지 말고 현금을 넉넉히 두세요"},
-    "데이터부족": {"label": "확인 중",          "tone": "gray",  "phase": "확인이 더 필요한",      "line": "데이터가 모자라 판단을 미뤄요."},
+    "공격":       {"label": "적극 매수",        "tone": "green", "phase": "적극적으로 사는",        "line": "시장 분위기가 건강해요. 사려고 점찍어 둔 좋은 종목은 계획대로 사도 괜찮아요."},
+    "중립":       {"label": "천천히 분할 매수",  "tone": "gray",  "phase": "천천히 나눠 사는",      "line": "뚜렷한 신호가 없는 보통 장이에요. 한 번에 사지 말고 여러 번 나눠서 사세요."},
+    "과열주의":   {"label": "매도 검토",        "tone": "amber", "phase": "과열을 경계하는",       "line": "시장이 너무 뜨거워요. 수익 난 종목은 일부 팔아 이익을 챙기고, 새로 사는 건 줄이세요."},
+    "역발상기회": {"label": "매수 기회",        "tone": "green", "phase": "다들 겁먹은 매수 기회의", "line": "겁먹고 파는 사람이 많지만 시장의 돈줄은 아직 괜찮아요. 많이 떨어진 좋은 종목을 나눠 사기 좋은 때예요."},
+    "방어":       {"label": "매수 금지",        "tone": "red",   "phase": "사지 않고 지키는",      "line": "시장에 위험 신호가 켜졌어요. 새로 사지 말고 현금을 넉넉히 두세요."},
+    "데이터부족": {"label": "확인 중",          "tone": "gray",  "phase": "확인이 더 필요한",      "line": "데이터가 모이는 중이에요. 조금만 기다려 주세요."},
 }
 EASY_FALLBACK = "데이터부족"
 
@@ -482,7 +481,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
             "differs": bool(pd.notna(prov) and pd.notna(conf) and prov != conf),
             "provisional_streak_days": provisional_streak(df),
             "easy": {**easy_verdict(None if pd.isna(conf) else str(conf)),
-                     "provisional_label": None if pd.isna(prov) else easy_verdict(str(prov))["label"]},
+                     "provisional_label": None if pd.isna(prov) or str(prov) == EASY_FALLBACK else easy_verdict(str(prov))["label"]},
         },
         "layers": {
             "trend": None if pd.isna(latest["추세"]) else str(latest["추세"]),
