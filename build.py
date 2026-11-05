@@ -411,6 +411,24 @@ def positioning_block(df: pd.DataFrame) -> dict | None:
     return out
 
 
+def prev_day_block(df: pd.DataFrame, indicators: dict) -> dict | None:
+    """직전 수집 행(전일) 스냅샷 — AI 해석이 '어제 대비 무엇이 바뀌었나'를 말하는 근거."""
+    if len(df) < 2:
+        return None
+    p = df.iloc[-2]
+    s = lambda v: None if pd.isna(v) else str(v)
+    conf = s(p["확정판정"])
+    return {
+        "date": df["수집일"].iloc[-2].strftime("%Y-%m-%d"),
+        "verdict": conf,
+        "verdict_label": easy_verdict(conf)["label"] if conf else None,
+        "layers": {"trend": s(p["추세"]), "credit": s(p["신용"]), "volatility": s(p["변동성"]),
+                   "sentiment": s(p["심리"]), "macro_warnings": _i(p["거시경고수"])},
+        "positioning_verdict": s(p["포지셔닝"]),
+        "values": {k: _f(p[spec["col"]]) for k, spec in INDICATORS.items()},
+    }
+
+
 def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
     today = today or datetime.now(timezone.utc).astimezone().date()
     latest = df.iloc[-1]
@@ -490,6 +508,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
             "sentiment": None if pd.isna(latest["심리"]) else str(latest["심리"]),
             "macro_warnings": _i(latest["거시경고수"]),
         },
+        "prev_day": prev_day_block(df, indicators),
         "indicators": indicators,
         "extras": extras,
         "ai_credit": ai,

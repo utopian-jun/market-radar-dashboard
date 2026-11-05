@@ -70,6 +70,19 @@ class LlmTest(unittest.TestCase):
         c2 = caller_returning(json.dumps(GOOD))
         self.assertEqual(llm.run(newer, self.tmp, caller=c2), "generated")
 
+    def test_prior_commentary_passed_and_kept_on_same_day_regen(self):
+        self.run_llm(caller_returning(json.dumps(GOOD)))             # 첫날 해석 저장
+        newer = dict(DATA, as_of="2099-01-01")
+        seen = []
+        def spy(payload, *a):
+            seen.append(payload["prev_commentary"]); return json.dumps(GOOD)
+        llm.run(newer, self.tmp, caller=spy)                          # 다음 날: 전일 해석이 입력에 들어간다
+        self.assertEqual(seen[0]["as_of"], DATA["as_of"])
+        self.assertEqual(seen[0]["overall"], GOOD["overall"])
+        llm.run(newer, self.tmp, force=True, caller=spy)              # 같은 날 재생성: 전일 해석 유지
+        self.assertEqual(seen[1]["as_of"], DATA["as_of"])
+        self.assertIsNone(llm.build_payload(DATA)["prev_commentary"])  # 첫 실행은 전일 해석 없음
+
 
 if __name__ == "__main__":
     unittest.main()

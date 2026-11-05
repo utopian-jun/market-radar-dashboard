@@ -34,6 +34,7 @@ SYSTEM_PROMPT = """너는 미국 시장 지표 대시보드의 해석 담당이�
 12. 포지셔닝(positioning)은 **최종 판정과 별개의 경보**로 다룬다. "포지셔닝 때문에 현금을 늘려라" 같은 매매·비중 문장은 쓰지 않는다. MOMENTUM·HIGH_BETA·VIX_TERM·CFTC 해석은 positioning 안의 값만 쓴다(모멘텀·고베타는 비율 절대값이 아니라 30일 변화율 중심으로 말한다).
 13. 종합(overall)에서 포지셔닝 판정(positioning.verdict)과 신용 층(layers.credit)을 함께 본다. 포지셔닝 🔴 + 신용 🟢/🟡이면 '펀더멘털 신용 붕괴 없이 포지션 정리로 흔들리는 장'으로, 포지셔닝 🔴 + 신용 🔴이면 '정리와 신용 악화가 겹친 국면'으로 서술할 수 있다. positioning이 null이면 포지셔닝은 언급하지 않는다.
 14. CFTC는 주간 데이터(화요일 기준·금요일 발표)라는 점과 기준일(as_of)을 문장에 밝힌다. 레버리지드 펀드는 구조적으로 S&P 선물 순매도인 경우가 많아 수준보다 1년 백분위와 4주 변화로 말한다.
+15. 입력에 prev_day(전일 스냅샷: 판정·층·지표 값)와 prev_commentary(전일 AI 해석)가 있으면 오늘 해석을 '전일 대비 달라진 점' 중심으로 쓴다. 종합(overall)의 둘째 문장에서 전일(prev_day.date) 대비 판정·층(layers vs prev_day.layers)이 바뀌었는지(안 바뀌었으면 "전일과 같다"고 짧게), 지표 중 change_1d_pct 절대값이 큰 1~3개를 숫자와 함께 말한다. 지표별 해석(indicators)에서도 전일 대비 변화가 눈에 띄면(change_1d, change_1d_pct) 한 문장 덧붙인다. 전일 해석과 같은 말을 되풀이하지 말고, 전일 해석에서 짚은 관찰 포인트(watch)가 오늘 실제로 어떻게 됐는지 한 문장으로 확인해 준다. prev_commentary·prev_day가 null이면 전일 비교는 생략한다. 전일 값에 없는 숫자는 만들지 않는다.
 JSON으로만 답한다."""
 
 GUIDE = {  # PLAN.md 5장 해석 기준 요약
@@ -63,14 +64,14 @@ RESPONSE_SCHEMA = {
 
 
 # ── 입력 구성 ─────────────────────────────────────────────
-def build_payload(data: dict) -> dict:
+def build_payload(data: dict, prev_commentary: dict | None = None) -> dict:
     inds = {}
     for k, s in data["indicators"].items():
-        inds[k] = {key: s[key] for key in (
+        inds[k] = {key: s.get(key) for key in (
             "label", "current", "prev_30d", "change_30d", "change_30d_pct", "mean", "min", "max",
-            "percentile", "thresholds", "zone_label", "near_threshold")}
+            "percentile", "thresholds", "zone_label", "near_threshold", "change_1d", "change_1d_pct")}
         inds[k]["guide"] = GUIDE.get(k)
-        for key in ("current", "prev_30d", "change_30d", "mean", "min", "max"):
+        for key in ("current", "prev_30d", "change_30d", "mean", "min", "max", "change_1d"):
             if isinstance(inds[k][key], float):
                 inds[k][key] = round(inds[k][key], 2)     # 모델이 소수 4자리를 그대로 읊지 않게
     return {
@@ -80,6 +81,8 @@ def build_payload(data: dict) -> dict:
         "history_days": data.get("history_days", data["collection_days"]),
         "verdict": data["verdict"],
         "layers": data["layers"],
+        "prev_day": data.get("prev_day"),
+        "prev_commentary": prev_commentary,
         "indicators": inds,
         "near_threshold": data["near_threshold"],
         "latest_row": data["latest_row"],
@@ -228,6 +231,17 @@ def _load(path: str):
         return None
 
 
+def _prior(prev: dict | None, as_of: str) -> dict | None:
+    """전일 해석(as_of가 오늘보다 앞선 가장 최근 것). 같은 날 재생성이면 파일에 저장해 둔 prior를 이어받는다."""
+    if not prev:
+        return None
+    if prev.get("as_of") != as_of:
+        src = {"as_of": prev.get("as_of"), "overall": prev.get("overall"), "watch": prev.get("watch")}
+    else:
+        src = prev.get("prior")
+    return src if src and src.get("overall") else None
+
+
 def run(data: dict, out_dir: str, *, force: bool = False, caller=call_gemini) -> str:
     """반환: 'skipped-no-key' | 'cached' | 'generated' | 'failed'"""
     path = os.path.join(out_dir, "commentary.json")
@@ -242,7 +256,8 @@ def run(data: dict, out_dir: str, *, force: bool = False, caller=call_gemini) ->
         return "skipped-no-key"
 
     model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL   # 빈 문자열(미설정 변수)도 기본값으로
-    payload = build_payload(data)
+    prior = _prior(prev, data["as_of"])
+    payload = build_payload(data, prior)
     allowed = allowed_numbers(payload)
     result, last_err = None, None
     for attempt, wait in enumerate(RETRY_WAITS, 1):     # JSON/호출 실패 시 대기 후 재시도
@@ -265,7 +280,7 @@ def run(data: dict, out_dir: str, *, force: bool = False, caller=call_gemini) ->
         return "failed"
 
     _write(path, {"as_of": data["as_of"], "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
-                  "model": model, "update_failed": False, **result})
+                  "model": model, "update_failed": False, "prior": prior, **result})
     print(f"commentary.json 생성: {path} ({model})")
     return "generated"
 
