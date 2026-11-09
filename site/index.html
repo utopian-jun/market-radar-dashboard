@@ -270,8 +270,8 @@ function renderVerdict(d) {
   if (e.line) box.append(el("div", "guide", e.line));
   const cp = v.confirm_progress;
   if (cp) {
-    const n = cp.days, met = n >= cp.need;
-    const msg = met ? "조건 충족 — 다음 수집 때 판정이 바뀌어요"
+    const n = cp.days, met = n >= cp.need, lab = e.provisional_label || "새 판정";
+    const msg = met ? "조건 충족(" + n + "일째) — 다음 수집 때 '" + lab + "'" + (/[가-힣]/.test(lab.slice(-1)) && (lab.charCodeAt(lab.length - 1) - 0xAC00) % 28 !== 0 ? "으로" : "로") + " 바뀌어요"
       : cp.mode === "exit"
         ? "위험 신호가 꺼진 지 " + n + "일째 — " + cp.need + "일이면 매수 금지 해제"
         : (e.provisional_label || "새") + " 신호 " + n + "일째 — " + cp.need + "일 이어지면 판정이 바뀌어요";
