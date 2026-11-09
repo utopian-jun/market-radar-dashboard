@@ -58,12 +58,29 @@ class BuildMergeTest(unittest.TestCase):
         self.assertEqual(d["series"]["source"], ["백필", "백필", "수집"])
         self.assertEqual(d["collection_first_date"], "2026-10-21")
 
-    def test_streak_stops_at_blank_backfill_rows(self):
-        r1, r2 = row("2026-10-20", "15", "백필"), row("2026-10-21", "20", "수집")
-        r2[build.COLUMNS.index("잠정판정")] = "중립"
-        r3 = row("2026-10-22", "21", "수집"); r3[build.COLUMNS.index("잠정판정")] = "중립"
-        d = build.build_data(build.parse(csv_of([r1, r2, r3])), today=date(2026, 10, 23))
-        self.assertEqual(d["verdict"]["provisional_streak_days"], 2)
+    def _prog(self, rows):
+        out = []
+        for i, (prov, conf, src) in enumerate(rows):
+            r = row("2026-10-%02d" % (i + 1), "20", src)
+            r[build.COLUMNS.index("잠정판정")], r[build.COLUMNS.index("확정판정")] = prov, conf
+            out.append(r)
+        d = build.build_data(build.parse(csv_of(out)), today=date(2026, 11, 20))
+        return d["verdict"]["confirm_progress"]
+
+    def test_switch_counts_collection_days_skipping_insufficient(self):
+        p = self._prog([("중립", "중립", "수집"), ("역발상기회", "중립", "수집"), ("데이터부족", "중립", "수집"),
+                        ("역발상기회", "중립", "수집")])
+        self.assertEqual(p, {"mode": "switch", "days": 2, "need": 3})
+
+    def test_exit_defense_counts_any_non_defense(self):
+        p = self._prog([("방어", "방어", "수집"), ("중립", "방어", "수집"), ("공격", "방어", "수집"), ("공격", "방어", "수집")])
+        self.assertEqual(p, {"mode": "exit", "days": 3, "need": 5})
+
+    def test_no_progress_when_same_or_backfill_rows_ignored(self):
+        self.assertIsNone(self._prog([("중립", "중립", "수집")]))
+        p = self._prog([("공격", "중립", "백필"), ("공격", "중립", ""), ("공격", "중립", "수집")])
+        self.assertEqual(p["days"], 1)          # 백필·빈칸 행은 세지 않는다
+        self.assertIsNone(self._prog([("공격", "중립", "")]))
 
     def test_legacy_22_column_header_is_all_collected(self):
         text = csv_of([row("2026-10-21", "20", "")])

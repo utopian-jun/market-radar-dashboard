@@ -173,6 +173,7 @@ def parse(text: str) -> pd.DataFrame:
     for c in TEXT_COLS:
         df[c] = df[c].replace("", pd.NA)
 
+    df["_strict"] = df["출처"].eq("수집")   # 확정판정 카운트 전용: W열이 정확히 '수집'인 행만 (collect.gs와 동일)
     df["출처"] = df["출처"].where(df["출처"].eq(BACKFILL), "수집")   # 백필 외 전부(빈칸 포함) 수집
     df["_bf"] = df["출처"].eq(BACKFILL)
 
@@ -271,18 +272,36 @@ def indicator_stats(df: pd.DataFrame, spec: dict, latest_date: pd.Timestamp, key
     }
 
 
-def provisional_streak(df: pd.DataFrame) -> int | None:
-    """잠정판정이 최신 값 그대로 이어진 연속 일수."""
-    s = df["잠정판정"]
-    if s.isna().iloc[-1]:
+# 확정판정 전환에 필요한 연속 수집일 — 시트 collect.gs(confirm_)의 CONFIRM_DAYS_·EXIT_DEFENSE_DAYS_와 같게 유지
+CONFIRM_DAYS = {"역발상기회": 3, "공격": 5, "중립": 5, "과열주의": 5}
+CONFIRM_DAYS_DEFAULT = 5
+EXIT_DEFENSE_DAYS = 5
+DEFENSE = "방어"
+
+
+def confirm_progress(df: pd.DataFrame) -> dict | None:
+    """확정판정이 바뀌기까지의 진행도 (collect.gs confirm_ 규칙).
+    W열이 정확히 '수집'인 행만(빈칸·백필 제외), 달력이 아닌 수집일 수로 센다. 잠정이 비었거나 '데이터부족'인 행은 건너뛴다(끊지도 세지도 않음).
+    - 확정=방어, 오늘 잠정≠방어: 방어가 아닌 잠정이 연속된 수집일 수 / 5 (종류 바뀌어도 계속 셈) → mode "exit"
+    - 그 외 오늘 잠정≠확정: 오늘 잠정과 같은 판정의 연속 수집일 수 / 필요 일수 → mode "switch"
+    진행 중이 아니면 None."""
+    last = df.iloc[-1]
+    prov, conf = last["잠정판정"], last["확정판정"]
+    if pd.isna(prov) or pd.isna(conf) or prov == EASY_FALLBACK or prov == conf or not last["_strict"]:
         return None
-    last, n = s.iloc[-1], 0
-    for v in reversed(s.tolist()):
-        if pd.notna(v) and v == last:    # 판정이 비어 있는 백필 행에서 멈춘다
-            n += 1
-        else:
+    seq = [v for v, ok in zip(df["잠정판정"], df["_strict"]) if ok and pd.notna(v) and v != EASY_FALLBACK]
+    days = 0
+    if conf == DEFENSE:
+        for v in reversed(seq):
+            if v == DEFENSE:
+                break
+            days += 1
+        return {"mode": "exit", "days": days, "need": EXIT_DEFENSE_DAYS}
+    for v in reversed(seq):
+        if v != prov:
             break
-    return n
+        days += 1
+    return {"mode": "switch", "days": days, "need": CONFIRM_DAYS.get(str(prov), CONFIRM_DAYS_DEFAULT)}
 
 
 def one_month_pct(df: pd.DataFrame, col: str, i: int):
@@ -497,7 +516,7 @@ def build_data(df: pd.DataFrame, today: date | None = None) -> dict:
             "provisional": None if pd.isna(prov) else str(prov),
             "cash_guide": CASH_GUIDE.get(str(conf), "") or None,
             "differs": bool(pd.notna(prov) and pd.notna(conf) and prov != conf),
-            "provisional_streak_days": provisional_streak(df),
+            "confirm_progress": confirm_progress(df),
             "easy": {**easy_verdict(None if pd.isna(conf) else str(conf)),
                      "provisional_label": None if pd.isna(prov) or str(prov) == EASY_FALLBACK else easy_verdict(str(prov))["label"]},
         },
